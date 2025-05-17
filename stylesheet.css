@@ -1,0 +1,7 @@
+/* Add this for the highlighter */
+.zone-highlight {
+    background-color: rgba(78, 154, 249, 0.2); /* A semi-transparent blue */
+    border: 2px solid rgba(78, 154, 249, 0.6);
+    border-radius: 6px;
+    /* transition: opacity 100ms ease-out, all 50ms ease-out; */ /* Optional: for smoother transitions */
+}

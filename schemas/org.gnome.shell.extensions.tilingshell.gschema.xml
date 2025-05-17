@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="gnome-shell-extensions">
+  <schema path="/org/gnome/shell/extensions/auto-zoner/" id="org.gnome.shell.extensions.auto-zoner">
+    <key name="enable-auto-zoning" type="b">
+      <default>true</default>
+      <summary>Enable Auto Zoning</summary>
+      <description>Automatically tile windows when moved into a defined zone.</description>
+    </key>
+    <key name="zones" type="s">
+      <default>'[]'</default> <!-- MODIFIED: Empty array as default -->
+      <summary>Zone Definitions</summary>
+      <description>A JSON string representing an array of zone objects. Each object: {monitorIndex: number, name: string, x: number, y: number, width: number, height: number}</description>
+    </key>
+    <key name="restore-original-size-on-untile" type="b">
+      <default>true</default>
+      <summary>Restore Original Size</summary>
+      <description>When a window is moved out of a zone, restore its original size and position.</description>
+    </key>
+    <key name="tile-new-windows" type="b">
+      <default>true</default>
+      <summary>Tile New Windows</summary>
+      <description>Automatically tile newly opened windows if they fall into a zone.</description>
+    </key>
+    <!-- ADD THIS NEW KEY for highlighting -->
+    <key name="highlight-on-hover" type="b">
+        <default>true</default>
+        <summary>Highlight Zone on Hover</summary>
+        <description>Visually highlight a zone when dragging a window over it.</description>
+    </key>
+  </schema>
+</schemalist>

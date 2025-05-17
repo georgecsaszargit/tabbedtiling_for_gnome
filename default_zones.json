@@ -1,0 +1,26 @@
+[
+  {
+    "monitorIndex": 0,
+    "name": "Default Left Half (from file)",
+    "x": 0,
+    "y": 0,
+    "width": 2560,
+    "height": 1440
+  },
+  {
+    "monitorIndex": 0,
+    "name": "Default Right Half (from file)",
+    "x": 2560,
+    "y": 0,
+    "width": 1280,
+    "height": 1440
+  },
+   {
+    "monitorIndex": 0,
+    "name": "Default Right Half (from file)",
+    "x": 3840,
+    "y": 0,
+    "width": 1280,
+    "height": 1440
+  }
+]
