@@ -1,126 +1,155 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
-const ZONE_SETTINGS_KEY = 'zones';
-const ENABLE_ZONING_KEY = 'enable-auto-zoning';
-const RESTORE_ON_UNTILE_KEY = 'restore-original-size-on-untile';
-const TILE_NEW_WINDOWS_KEY = 'tile-new-windows';
-const HIGHLIGHT_ON_HOVER_KEY = 'highlight-on-hover';
-const DEFAULT_ZONES_FILENAME = 'default_zones.json';
+const SCHEMA_ID                    = 'org.gnome.shell.extensions.autozoner';
+const ZONE_SETTINGS_KEY           = 'zones';
+const ENABLE_ZONING_KEY           = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY       = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY        = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY      = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY       = 'cycle-zone-windows-accelerator';
+const DEFAULT_ZONES_FILENAME      = 'default_zones.json';
 
 const log = (msg) => console.log(`[AutoZoner.SettingsManager] ${msg}`);
 
 export class SettingsManager {
-    constructor(gsettings, extensionPath) {
-        this._gsettings = gsettings;
-        this._extensionPath = extensionPath;
-        this._zones = [];
+    /**
+     * @param {string} extensionPath  Absolute path to the extension root
+     */
+    constructor(extensionPath) {
+        // 1) Build a schema source from our own schemas/ directory
+        const schemaDir = GLib.build_filenamev([extensionPath, 'schemas']);
+        const source    = Gio.SettingsSchemaSource.new_from_directory(
+            schemaDir,
+            Gio.SettingsSchemaSource.get_default(),
+            false
+        );
+        const schemaObj = source.lookup(SCHEMA_ID, false);
+        if (!schemaObj)
+            throw new Error(`Schema ${SCHEMA_ID} not found in ${schemaDir}`);
+
+        // 2) Create Gio.Settings from that schema object
+        this._gsettings      = new Gio.Settings({ settings_schema: schemaObj });
+        this._extensionPath  = extensionPath;
+        this._zones          = [];
         this._signalHandlers = new Map();
 
+        // 3) Load defaults from file if needed, then pull zones into memory
         this._loadDefaultZonesFromFileIfNeeded();
-        this._loadZonesFromGSettings(); // Initial load
+        this._loadZonesFromGSettings();
 
-        this._connectSettingChange(ZONE_SETTINGS_KEY, () => this._loadZonesFromGSettings());
+        // 4) Watch for changes to the 'zones' and accelerator keys
+        this._connectSettingChange(ZONE_SETTINGS_KEY,      () => this._loadZonesFromGSettings());
+        this._connectSettingChange(CYCLE_ACCELERATOR_KEY,  () => log('Cycle accelerator changed'));
     }
 
-    _loadDefaultZonesFromFileIfNeeded() {
-        log(`Attempting to load zones from ${DEFAULT_ZONES_FILENAME} to update GSettings on enable.`);
-        const defaultZonesFile = Gio.File.new_for_path(GLib.build_filenamev([this._extensionPath, DEFAULT_ZONES_FILENAME]));
+    // PRIVATE
 
+    _loadDefaultZonesFromFileIfNeeded() {
+        log(`Checking for ${DEFAULT_ZONES_FILENAME} to seed GSettings…`);
+        const file = Gio.File.new_for_path(
+            GLib.build_filenamev([this._extensionPath, DEFAULT_ZONES_FILENAME])
+        );
         try {
-            if (defaultZonesFile.query_exists(null)) {
-                const [success, contents] = defaultZonesFile.load_contents(null);
-                if (success) {
-                    const decoder = new TextDecoder('utf-8');
-                    const newZonesStringFromFile = decoder.decode(contents);
-                    if (newZonesStringFromFile.trim().startsWith('[') && newZonesStringFromFile.trim().endsWith(']')) {
-                        const currentGSettingsZones = this._gsettings.get_string(ZONE_SETTINGS_KEY);
-                        if (currentGSettingsZones !== newZonesStringFromFile) {
-                            this._gsettings.set_string(ZONE_SETTINGS_KEY, newZonesStringFromFile);
-                            log(`Updated GSettings for 'zones' from ${DEFAULT_ZONES_FILENAME}.`);
+            if (file.query_exists(null)) {
+                const [ok, contents] = file.load_contents(null);
+                if (ok) {
+                    const str = new TextDecoder('utf-8').decode(contents).trim();
+                    if (str.startsWith('[') && str.endsWith(']')) {
+                        const current = this._gsettings.get_string(ZONE_SETTINGS_KEY);
+                        if (current !== str) {
+                            this._gsettings.set_string(ZONE_SETTINGS_KEY, str);
+                            log(`Imported zones from ${DEFAULT_ZONES_FILENAME}`);
                         } else {
-                            log(`GSettings for 'zones' already matches ${DEFAULT_ZONES_FILENAME}. No update needed.`);
+                            log(`Zones already match ${DEFAULT_ZONES_FILENAME}`);
                         }
                     } else {
-                        log(`Error: Content of ${DEFAULT_ZONES_FILENAME} does not appear to be a valid JSON array string. GSettings not updated from file.`);
+                        log(`Invalid JSON array in ${DEFAULT_ZONES_FILENAME}; skipping import`);
                     }
                 } else {
-                    log(`Error: Could not load contents of ${DEFAULT_ZONES_FILENAME}. GSettings not updated from file.`);
+                    log(`Failed to read ${DEFAULT_ZONES_FILENAME}; skipping import`);
                 }
             } else {
-                 log(`Info: ${DEFAULT_ZONES_FILENAME} does not exist at path: ${defaultZonesFile.get_path()}. Using current GSettings for 'zones'.`);
+                log(`${DEFAULT_ZONES_FILENAME} not present; using existing settings`);
             }
         } catch (e) {
-            log(`Error processing ${DEFAULT_ZONES_FILENAME}: ${e}. Using current GSettings for 'zones'.`);
+            log(`Error loading ${DEFAULT_ZONES_FILENAME}: ${e}`);
         }
     }
 
     _loadZonesFromGSettings() {
         try {
-            const zonesJson = this._gsettings.get_string(ZONE_SETTINGS_KEY);
-            this._zones = JSON.parse(zonesJson);
-            if (!Array.isArray(this._zones)) {
-                this._zones = [];
-                log("Error: Zones GSetting is not an array. Reverting to empty.");
-            }
-            log(`Loaded ${this._zones.length} zones from GSettings.`);
-            // Optionally, emit a signal here if other modules need to react to zone reloads
-            // this.emit('zones-updated');
+            const json = this._gsettings.get_string(ZONE_SETTINGS_KEY);
+            const parsed = JSON.parse(json);
+            this._zones = Array.isArray(parsed) ? parsed : [];
+            log(`Loaded ${this._zones.length} zones from GSettings`);
         } catch (e) {
-            log(`Error parsing zones JSON from GSettings: ${e}. Using empty zones array.`);
+            log(`Error parsing zones JSON: ${e}; clearing zones`);
             this._zones = [];
         }
     }
 
     _connectSettingChange(key, callback) {
         const id = this._gsettings.connect(`changed::${key}`, callback);
-        if (!this._signalHandlers.has(this._gsettings)) {
+        if (!this._signalHandlers.has(this._gsettings))
             this._signalHandlers.set(this._gsettings, []);
-        }
         this._signalHandlers.get(this._gsettings).push(id);
     }
 
+    // PUBLIC API
+
+    /** @returns {Gio.Settings} */
     getGSettingObject() {
         return this._gsettings;
     }
 
+    /** @returns {Array<Object>} array of zone definitions */
     getZones() {
-        return this._zones; // Returns the cached array
+        return this._zones;
     }
 
+    /** @returns {boolean} */
     isZoningEnabled() {
         return this._gsettings.get_boolean(ENABLE_ZONING_KEY);
     }
-
+    /** @returns {boolean} */
     isRestoreOnUntileEnabled() {
         return this._gsettings.get_boolean(RESTORE_ON_UNTILE_KEY);
     }
-
+    /** @returns {boolean} */
     isTileNewWindowsEnabled() {
         return this._gsettings.get_boolean(TILE_NEW_WINDOWS_KEY);
     }
-
+    /** @returns {boolean} */
     isHighlightOnHoverEnabled() {
         return this._gsettings.get_boolean(HIGHLIGHT_ON_HOVER_KEY);
     }
+    /** @returns {string} accelerator string */
+    get cycleZoneWindowsAccelerator() {
+        return this._gsettings.get_string(CYCLE_ACCELERATOR_KEY);
+    }
 
-    connect(key, callback) { // Convenience for other modules to listen to setting changes
+    /**
+     * Convenience for other modules to listen to setting changes
+     * @param {string} key
+     * @param {Function} callback
+     */
+    connect(key, callback) {
         return this._connectSettingChange(key, callback);
     }
 
+    /** Disconnects all signals and cleans up. */
     destroy() {
-        this._signalHandlers.forEach((ids, gobject) => {
+        for (const [gobj, ids] of this._signalHandlers) {
             ids.forEach(id => {
-                 try {
-                    if (gobject.is_connected && gobject.is_connected(id)) {
-                        gobject.disconnect(id);
-                    } else if (gobject.disconnect && typeof gobject.disconnect === 'function') {
-                         gobject.disconnect(id);
-                    }
+                try {
+                    if (gobj.is_connected?.(id)) gobj.disconnect(id);
+                    else if (gobj.disconnect)       gobj.disconnect(id);
                 } catch (e) { /* ignore */ }
             });
-        });
+        }
         this._signalHandlers.clear();
-        log("Destroyed.");
+        log('Destroyed.');
     }
 }
+

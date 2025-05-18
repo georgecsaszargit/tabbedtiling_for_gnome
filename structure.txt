@@ -1,0 +1,17 @@
+.
+├── default_zones.json
+├── extension.js
+├── metadata.json
+├── modules
+│   ├── HighlightManager.js
+│   ├── Indicator.js
+│   ├── SettingsManager.js
+│   ├── WindowManager.js
+│   ├── ZoneDetector.js
+│   └── ZoneHighlighter.js
+├── prefs.js
+├── schemas
+│   ├── gschemas.compiled
+│   └── org.gnome.shell.extensions.tilingshell.gschema.xml
+├── stylesheet.css
+

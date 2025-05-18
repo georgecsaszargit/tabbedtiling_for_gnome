@@ -1,11 +1,11 @@
 {
   "name": "Auto Zoner",
   "description": "Automatically tiles windows into predefined screen zones.",
-  "uuid": "tilingshell@georgecs.com",
-  "settings-schema": "org.gnome.shell.extensions.tilingshell",
+  "uuid": "autozoner@georgecs.com",
+  "settings-schema": "org.gnome.shell.extensions.autozoner",
   "shell-version": ["45", "46", "47", "48"],
   "version": 1,
-  "gettext-domain": "auto-zoner",
-  "settings-schema": "org.gnome.shell.extensions.auto-zoner",
-  "url": "https://github.com/your-username/auto-zoner"
+  "gettext-domain": "autozoner",
+  "settings-schema": "org.gnome.shell.extensions.autozoner",
+  "url": "https://github.com/your-username/autozoner"
 }
