@@ -1,3 +1,4 @@
+<!-- schemas/org.gnome.shell.extensions.autozoner.gschema.xml -->
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist gettext-domain="gnome-shell-extensions">
   <schema path="/org/gnome/shell/extensions/autozoner/" id="org.gnome.shell.extensions.autozoner">
@@ -10,7 +11,7 @@
     <key name="zones" type="s">
       <default>'[]'</default>
       <summary>Zone Definitions</summary>
-      <description>A JSON string representing an array of zone objects. Each object: {monitorIndex: number, name: string, x: number, y: number, width: number, height: number}</description>
+      <description>A JSON string representing an array of zone objects.</description>
     </key>
 
     <key name="restore-original-size-on-untile" type="b">
@@ -31,11 +32,13 @@
       <description>Visually highlight a zone when dragging a window over it.</description>
     </key>
 
-    <!-- NEW -->
-    <key name="cycle-zone-windows-accelerator" type="s">
-      <default>'&lt;Control&gt;&lt;Alt&gt;Tab'</default>
+    <!-- cycle binding is now a string-array, defaulting to Ctrl+Alt+8 -->
+    <key name="cycle-zone-windows-accelerator" type="as">
+      <default>['&lt;Control&gt;&lt;Alt&gt;8']</default>
       <summary>Cycle Windows in Active Zone</summary>
-      <description>Keyboard shortcut to loop focus through windows snapped into the currently active zone.</description>
+      <description>
+        Keyboard shortcut to loop focus through windows snapped into the currently active zone.
+      </description>
     </key>
   </schema>
 </schemalist>
