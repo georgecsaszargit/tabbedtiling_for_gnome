@@ -1,4 +1,3 @@
-<!-- schemas/org.gnome.shell.extensions.autozoner.gschema.xml -->
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist gettext-domain="gnome-shell-extensions">
   <schema path="/org/gnome/shell/extensions/autozoner/" id="org.gnome.shell.extensions.autozoner">
@@ -17,7 +16,7 @@
     <key name="restore-original-size-on-untile" type="b">
       <default>true</default>
       <summary>Restore Original Size</summary>
-      <description>When a window is moved out of a zone, restore its original size and position.</description>
+      <description>When a window leaves all zones, restore its previous size/position.</description>
     </key>
 
     <key name="tile-new-windows" type="b">
@@ -32,13 +31,16 @@
       <description>Visually highlight a zone when dragging a window over it.</description>
     </key>
 
-    <!-- cycle binding is now a string-array, defaulting to Ctrl+Alt+8 -->
     <key name="cycle-zone-windows-accelerator" type="as">
       <default>['&lt;Control&gt;&lt;Alt&gt;8']</default>
-      <summary>Cycle Windows in Active Zone</summary>
-      <description>
-        Keyboard shortcut to loop focus through windows snapped into the currently active zone.
-      </description>
+      <summary>Cycle Windows Forward</summary>
+      <description>Keyboard shortcut to loop focus forward through windows in the active zone.</description>
+    </key>
+
+    <key name="cycle-zone-windows-backward-accelerator" type="as">
+      <default>['&lt;Control&gt;&lt;Alt&gt;9']</default>
+      <summary>Cycle Windows Backward</summary>
+      <description>Keyboard shortcut to loop focus backward through windows in the active zone.</description>
     </key>
   </schema>
 </schemalist>
