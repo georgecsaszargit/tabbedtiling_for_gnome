@@ -1,14 +1,16 @@
 // modules/SettingsManager.js
+
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
-const ZONE_SETTINGS_KEY           = 'zones';
-const ENABLE_ZONING_KEY           = 'enable-auto-zoning';
-const RESTORE_ON_UNTILE_KEY       = 'restore-original-size-on-untile';
-const TILE_NEW_WINDOWS_KEY        = 'tile-new-windows';
-const HIGHLIGHT_ON_HOVER_KEY      = 'highlight-on-hover';
-const CYCLE_ACCELERATOR_KEY       = 'cycle-zone-windows-accelerator';
-const DEFAULT_ZONES_FILENAME      = 'default_zones.json';
+const ZONE_SETTINGS_KEY                  = 'zones';
+const ENABLE_ZONING_KEY                  = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY              = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY               = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY             = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
+const DEFAULT_ZONES_FILENAME             = 'default_zones.json';
 
 const log = (msg) => console.log(`[AutoZoner.SettingsManager] ${msg}`);
 
@@ -24,6 +26,7 @@ export class SettingsManager {
 
         this._connectSettingChange(ZONE_SETTINGS_KEY, () => this._loadZonesFromGSettings());
         this._connectSettingChange(CYCLE_ACCELERATOR_KEY, () => log('Cycle accelerator changed'));
+        this._connectSettingChange(CYCLE_BACKWARD_ACCELERATOR_KEY, () => log('Backward cycle accelerator changed'));
     }
 
     _loadDefaultZonesFromFileIfNeeded() {
@@ -95,25 +98,20 @@ export class SettingsManager {
         return this._gsettings.get_boolean(HIGHLIGHT_ON_HOVER_KEY);
     }
 
-    // NEW: return the first accelerator from the array
     get cycleZoneWindowsAccelerator() {
         const arr = this._gsettings.get_strv(CYCLE_ACCELERATOR_KEY);
         return arr.length > 0 ? arr[0] : '';
     }
 
-    connect(key, callback) {
-        return this._connectSettingChange(key, callback);
+    get cycleZoneWindowsBackwardAccelerator() {
+        const arr = this._gsettings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY);
+        return arr.length > 0 ? arr[0] : '';
     }
 
     destroy() {
         for (const [gobj, ids] of this._signalHandlers) {
             ids.forEach(id => {
-                try {
-                    if (gobj.is_connected?.(id))
-                        gobj.disconnect(id);
-                    else
-                        gobj.disconnect(id);
-                } catch {}
+                try { gobj.disconnect(id); } catch {}
             });
         }
         this._signalHandlers.clear();

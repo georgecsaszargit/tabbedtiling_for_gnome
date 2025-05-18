@@ -10,32 +10,32 @@ import { HighlightManager } from './modules/HighlightManager.js';
 import { WindowManager }    from './modules/WindowManager.js';
 import { Indicator }        from './modules/Indicator.js';
 
-const ENABLE_ZONING_KEY     = 'enable-auto-zoning';
-const CYCLE_ACCELERATOR_KEY = 'cycle-zone-windows-accelerator';
+const ENABLE_ZONING_KEY               = 'enable-auto-zoning';
+const CYCLE_ACCELERATOR_KEY           = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY  = 'cycle-zone-windows-backward-accelerator';
 const log = msg => console.log(`[AutoZoner.Main] ${msg}`);
 
 export default class AutoZonerExtension extends Extension {
     constructor(metadata) {
         super(metadata);
-        this._settingsManager     = null;
-        this._highlightManager    = null;
-        this._windowManager       = null;
-        this._indicator           = null;
-        this._monitorsChangedId   = 0;
-        this._zoningChangedId     = 0;
-        this._cycleAccelChangedId = 0;
+        this._settingsManager             = null;
+        this._highlightManager            = null;
+        this._windowManager               = null;
+        this._indicator                   = null;
+        this._monitorsChangedId           = 0;
+        this._zoningChangedId             = 0;
+        this._cycleAccelChangedId         = 0;
+        this._cycleBackwardAccelChangedId = 0;
     }
 
     enable() {
         log('Enabling…');
 
-        // 1) Initialize
         this._settingsManager  = new SettingsManager(this.getSettings(), this.path);
         this._highlightManager = new HighlightManager(this._settingsManager);
         this._windowManager    = new WindowManager(this._settingsManager, this._highlightManager);
         this._indicator        = new Indicator(this.uuid, this._settingsManager, this);
 
-        // 2) Tile/untile signals
         this._windowManager.connectSignals();
         this._zoningChangedId = this._settingsManager.getGSettingObject().connect(
             `changed::${ENABLE_ZONING_KEY}`,
@@ -45,7 +45,6 @@ export default class AutoZonerExtension extends Extension {
             }
         );
 
-        // 3) Reinit highlighters on monitor change
         if (Main.layoutManager) {
             this._monitorsChangedId = Main.layoutManager.connect(
                 'monitors-changed',
@@ -53,14 +52,23 @@ export default class AutoZonerExtension extends Extension {
             );
         }
 
-        // 4) Install and watch the cycle-windows keybinding
         this._addCycleKeybinding();
+        this._addCycleBackwardKeybinding();
+
         this._cycleAccelChangedId = this._settingsManager.getGSettingObject().connect(
             `changed::${CYCLE_ACCELERATOR_KEY}`,
             () => {
                 log('Cycle accelerator changed; rebinding…');
                 Main.wm.removeKeybinding(CYCLE_ACCELERATOR_KEY);
                 this._addCycleKeybinding();
+            }
+        );
+        this._cycleBackwardAccelChangedId = this._settingsManager.getGSettingObject().connect(
+            `changed::${CYCLE_BACKWARD_ACCELERATOR_KEY}`,
+            () => {
+                log('Backward cycle accelerator changed; rebinding…');
+                Main.wm.removeKeybinding(CYCLE_BACKWARD_ACCELERATOR_KEY);
+                this._addCycleBackwardKeybinding();
             }
         );
 
@@ -82,8 +90,13 @@ export default class AutoZonerExtension extends Extension {
             this._settingsManager.getGSettingObject().disconnect(this._cycleAccelChangedId);
             this._cycleAccelChangedId = 0;
         }
+        if (this._cycleBackwardAccelChangedId) {
+            this._settingsManager.getGSettingObject().disconnect(this._cycleBackwardAccelChangedId);
+            this._cycleBackwardAccelChangedId = 0;
+        }
 
         Main.wm.removeKeybinding(CYCLE_ACCELERATOR_KEY);
+        Main.wm.removeKeybinding(CYCLE_BACKWARD_ACCELERATOR_KEY);
 
         this._windowManager.cleanupWindowProperties();
         this._windowManager.destroy();
@@ -95,7 +108,6 @@ export default class AutoZonerExtension extends Extension {
     }
 
     _addCycleKeybinding() {
-        // Grab the primary accelerator from GSettings
         const accel = this._settingsManager.getGSettingObject().get_strv(CYCLE_ACCELERATOR_KEY)[0];
         log(`Binding cycle shortcut: ${accel}`);
 
@@ -107,6 +119,22 @@ export default class AutoZonerExtension extends Extension {
             () => {
                 log('🏷️ Cycle shortcut pressed!');
                 this._windowManager.cycleWindowsInCurrentZone();
+            }
+        );
+    }
+
+    _addCycleBackwardKeybinding() {
+        const accel = this._settingsManager.getGSettingObject().get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY)[0];
+        log(`Binding backward cycle shortcut: ${accel}`);
+
+        Main.wm.addKeybinding(
+            CYCLE_BACKWARD_ACCELERATOR_KEY,
+            this._settingsManager.getGSettingObject(),
+            Meta.KeyBindingFlags.NONE,
+            Shell.ActionMode.ALL,
+            () => {
+                log('🏷️ Backward cycle shortcut pressed!');
+                this._windowManager.cycleWindowsInCurrentZoneBackward();
             }
         );
     }

@@ -9,12 +9,13 @@ import Gdk from 'gi://Gdk';
 import { ExtensionPreferences, gettext as _ } from
        'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-const ZONE_SETTINGS_KEY        = 'zones';
-const ENABLE_ZONING_KEY        = 'enable-auto-zoning';
-const RESTORE_ON_UNTILE_KEY    = 'restore-original-size-on-untile';
-const TILE_NEW_WINDOWS_KEY     = 'tile-new-windows';
-const HIGHLIGHT_ON_HOVER_KEY   = 'highlight-on-hover';
-const CYCLE_ACCELERATOR_KEY    = 'cycle-zone-windows-accelerator';
+const ZONE_SETTINGS_KEY                  = 'zones';
+const ENABLE_ZONING_KEY                  = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY              = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY               = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY             = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
 
 const log = msg => console.log(`[AutoZonerPrefs] ${msg}`);
 
@@ -37,7 +38,10 @@ class ZoneEditorGrid extends Gtk.Grid {
         this._zone = { ...zoneData };
 
         // Name
-        this.attach(new Gtk.Label({ label: _('Name:'), halign: Gtk.Align.END }), 0, 0, 1, 1);
+        this.attach(
+            new Gtk.Label({ label: _('Name:'), halign: Gtk.Align.END }),
+            0, 0, 1, 1
+        );
         this._nameEntry = new Gtk.Entry({ text: this._zone.name || '', hexpand: true });
         this._nameEntry.connect('changed', () => {
             this._zone.name = this._nameEntry.get_text();
@@ -46,7 +50,10 @@ class ZoneEditorGrid extends Gtk.Grid {
         this.attach(this._nameEntry, 1, 0, 3, 1);
 
         // Monitor Index
-        this.attach(new Gtk.Label({ label: _('Monitor Index:'), halign: Gtk.Align.END }), 0, 1, 1, 1);
+        this.attach(
+            new Gtk.Label({ label: _('Monitor Index:'), halign: Gtk.Align.END }),
+            0, 1, 1, 1
+        );
         this._monitorSpin = Gtk.SpinButton.new_with_range(0, Math.max(0, monitorCount - 1), 1);
         this._monitorSpin.set_value(this._zone.monitorIndex || 0);
         this._monitorSpin.connect('value-changed', () => {
@@ -65,7 +72,10 @@ class ZoneEditorGrid extends Gtk.Grid {
         fields.forEach((f, i) => {
             const row = Math.floor(i / 2) + 2;
             const col = (i % 2) * 2;
-            this.attach(new Gtk.Label({ label: f.label, halign: Gtk.Align.END }), col, row, 1, 1);
+            this.attach(
+                new Gtk.Label({ label: f.label, halign: Gtk.Align.END }),
+                col, row, 1, 1
+            );
             const spin = Gtk.SpinButton.new_with_range(0, 10000, 10);
             spin.set_value(this._zone[f.key] || 0);
             spin.set_hexpand(true);
@@ -87,11 +97,9 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         this._settings = this.getSettings();
         this._window   = window;
 
-        // Monitor count
         const display      = Gdk.Display.get_default();
         const monitorCount = display.get_monitors().get_n_items();
 
-        // Preferences page
         const page = new Adw.PreferencesPage();
         window.add(page);
 
@@ -143,15 +151,13 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         tileRow.add_suffix(tileSwitch);
         generalGroup.add(tileRow);
 
-        // Cycle Zone Windows Shortcut (manual entry)
+        // Cycle Zone Windows Shortcut (forward)
         const accelEntry = new Gtk.Entry({
             hexpand: true,
             placeholder_text: '<Control><Alt>8'
         });
-        // Load existing accelerator
         const existing = this._settings.get_strv(CYCLE_ACCELERATOR_KEY);
         accelEntry.set_text(existing[0] || '');
-        // Save on Enter
         accelEntry.connect('activate', () => {
             const text = accelEntry.get_text().trim();
             if (text) {
@@ -161,11 +167,33 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         const accelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Shortcut'),
-            subtitle: _('Type the accelerator string (e.g. <Control><Alt>8) then press Enter'),
+            subtitle: _('Type the accelerator string (e.g. &lt;Control&gt;&lt;Alt&gt;8) then press Enter'),
             activatable_widget: accelEntry
         });
         accelRow.add_suffix(accelEntry);
         generalGroup.add(accelRow);
+
+        // Cycle Zone Windows Backward Shortcut
+        const backwardAccelEntry = new Gtk.Entry({
+            hexpand: true,
+            placeholder_text: '<Control><Alt>9'
+        });
+        const existingBackward = this._settings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY);
+        backwardAccelEntry.set_text(existingBackward[0] || '');
+        backwardAccelEntry.connect('activate', () => {
+            const text = backwardAccelEntry.get_text().trim();
+            if (text) {
+                this._settings.set_strv(CYCLE_BACKWARD_ACCELERATOR_KEY, [ text ]);
+                log(`Saved backward cycle shortcut: ${text}`);
+            }
+        });
+        const backwardAccelRow = new Adw.ActionRow({
+            title: _('Cycle Zone Windows Backward Shortcut'),
+            subtitle: _('Type the accelerator string (e.g. &lt;Control&gt;&lt;Alt&gt;9) then press Enter'),
+            activatable_widget: backwardAccelEntry
+        });
+        backwardAccelRow.add_suffix(backwardAccelEntry);
+        generalGroup.add(backwardAccelRow);
 
         // Zone Definitions Group
         this._zonesGroup = new Adw.PreferencesGroup({
@@ -190,7 +218,6 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
     }
 
     _loadZonesToUI(monitorCount) {
-        // Remove existing ExpanderRows
         let child = this._zonesGroup.get_first_child();
         while (child) {
             const next = child.get_next_sibling();

@@ -16,7 +16,6 @@ export class WindowManager {
         this._zoneDetector      = new ZoneDetector();
         this._signalConnections = [];
 
-        // windows grouped by zoneId, and cycle indices
         this._snappedWindows    = {};
         this._cycleIndexByZone  = {};
 
@@ -49,23 +48,9 @@ export class WindowManager {
 
     _disconnectSignals() {
         this._signalConnections.forEach(({ gobj, id }) => {
-            try {
-                if (gobj.is_connected?.(id))
-                    gobj.disconnect(id);
-                else
-                    gobj.disconnect(id);
-            } catch (e) {
-                log('_disconnectSignals', `Error: ${e}`);
-            }
+            try { gobj.disconnect(id); } catch (e) { log('_disconnectSignals', `Error: ${e}`); }
         });
         this._signalConnections = [];
-    }
-
-    _getMonitorWorkArea(mon) {
-        const lm = Main.layoutManager;
-        return (mon < 0 || mon >= lm.monitors.length)
-            ? lm.getWorkAreaForMonitor(lm.primaryIndex)
-            : lm.getWorkAreaForMonitor(mon);
     }
 
     _onGrabOpBegin(display, window, op) {
@@ -77,7 +62,6 @@ export class WindowManager {
             window._autoZonerOriginalRect = window.get_frame_rect();
             log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}"`);
         }
-
         if (this._highlightManager)
             this._highlightManager.startUpdating();
     }
@@ -103,30 +87,25 @@ export class WindowManager {
             if (window.get_maximized())
                 window.unmaximize(Meta.MaximizeFlags.BOTH);
 
-            const wa    = this._getMonitorWorkArea(mon);
+            const wa    = Main.layoutManager.getWorkAreaForMonitor(mon);
             const newX  = wa.x + targetZone.x;
             const newY  = wa.y + targetZone.y;
             const zoneId = targetZone.name || JSON.stringify(targetZone);
 
-            // Remove from other zones
             for (const zid of Object.keys(this._snappedWindows)) {
-                this._snappedWindows[zid] =
-                    this._snappedWindows[zid].filter(w => w !== window);
+                this._snappedWindows[zid] = this._snappedWindows[zid].filter(w => w !== window);
             }
 
-            // Add to this zone
             this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
             this._snappedWindows[zoneId].push(window);
 
-            // Tag + reset index
             window._autoZonerZoneId       = zoneId;
             this._cycleIndexByZone[zoneId] = 0;
 
             window.move_resize_frame(false, newX, newY, targetZone.width, targetZone.height);
             window._autoZonerIsZoned = true;
             log('_onGrabOpEnd', `Snapped "${window.get_title()}" into zone "${zoneId}"`);
-        }
-        else if (window._autoZonerIsZoned) {
+        } else if (window._autoZonerIsZoned) {
             if (this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
                 const o = window._autoZonerOriginalRect;
                 window.move_resize_frame(false, o.x, o.y, o.width, o.height);
@@ -152,21 +131,18 @@ export class WindowManager {
             return;
         }
 
-        // Advance & wrap index
         let idx = (this._cycleIndexByZone[zoneId] + 1) % list.length;
         this._cycleIndexByZone[zoneId] = idx;
         const nextWin = list[idx];
 
         log('cycle', `Animating to [${idx}] "${nextWin.get_title()}" in zone "${zoneId}".`);
 
-        // Find the actor for that window
         const actor = global.get_window_actors()
             .find(a => a.get_meta_window() === nextWin);
         if (actor) {
-            // Slide in from off-screen bottom
-            const mon  = nextWin.get_monitor();
-            const wa   = Main.layoutManager.getWorkAreaForMonitor(mon);
-            const finalY = actor.get_y();
+            const mon     = nextWin.get_monitor();
+            const wa      = Main.layoutManager.getWorkAreaForMonitor(mon);
+            const finalY  = actor.get_y();
             actor.set_y(wa.y + wa.height + 10);
             actor.ease({
                 y:        finalY,
@@ -174,9 +150,43 @@ export class WindowManager {
                 mode:     Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
-
-        // Finally activate
         nextWin.activate(global.get_current_time());
+    }
+
+    cycleWindowsInCurrentZoneBackward() {
+        const focus = global.display.focus_window;
+        if (!focus || !focus._autoZonerZoneId) {
+            log('cycle-backward', 'No zoned window focused; aborting.');
+            return;
+        }
+
+        const zoneId = focus._autoZonerZoneId;
+        const list   = this._snappedWindows[zoneId] || [];
+        if (list.length < 2) {
+            log('cycle-backward', `Zone "${zoneId}" has ${list.length} window(s); skipping.`);
+            return;
+        }
+
+        let idx = (this._cycleIndexByZone[zoneId] - 1 + list.length) % list.length;
+        this._cycleIndexByZone[zoneId] = idx;
+        const prevWin = list[idx];
+
+        log('cycle-backward', `Animating backward to [${idx}] "${prevWin.get_title()}" in zone "${zoneId}".`);
+
+        const actor = global.get_window_actors()
+            .find(a => a.get_meta_window() === prevWin);
+        if (actor) {
+            const mon     = prevWin.get_monitor();
+            const wa      = Main.layoutManager.getWorkAreaForMonitor(mon);
+            const finalY  = actor.get_y();
+            actor.set_y(wa.y - actor.get_height() - 10);
+            actor.ease({
+                y:        finalY,
+                duration: 300,
+                mode:     Clutter.AnimationMode.EASE_OUT_QUAD,
+            });
+        }
+        prevWin.activate(global.get_current_time());
     }
 
     cleanupWindowProperties() {
