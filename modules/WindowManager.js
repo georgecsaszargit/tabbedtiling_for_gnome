@@ -1,6 +1,8 @@
 // modules/WindowManager.js
 
-import Meta from 'gi://Meta';
+import Meta    from 'gi://Meta';
+import GLib    from 'gi://GLib';
+import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { ZoneDetector } from './ZoneDetector.js';
@@ -14,9 +16,8 @@ export class WindowManager {
         this._zoneDetector      = new ZoneDetector();
         this._signalConnections = [];
 
-        // Windows grouped by zoneId
-        this._snappedWindows    = {};  
-        // Current cycle index in each zone
+        // windows grouped by zoneId, and cycle indices
+        this._snappedWindows    = {};
         this._cycleIndexByZone  = {};
 
         log('constructor', 'Initialized.');
@@ -38,7 +39,7 @@ export class WindowManager {
     }
 
     _onWindowCreated(display, window) {
-        // no-op stub
+        // stub
     }
 
     _connect(gobj, name, cb) {
@@ -69,7 +70,8 @@ export class WindowManager {
 
     _onGrabOpBegin(display, window, op) {
         if ((op & Meta.GrabOp.MOVING) === 0) return;
-        if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) return;
+        if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
+            return;
 
         if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
             window._autoZonerOriginalRect = window.get_frame_rect();
@@ -101,22 +103,22 @@ export class WindowManager {
             if (window.get_maximized())
                 window.unmaximize(Meta.MaximizeFlags.BOTH);
 
-            const wa   = this._getMonitorWorkArea(mon);
-            const newX = wa.x + targetZone.x;
-            const newY = wa.y + targetZone.y;
+            const wa    = this._getMonitorWorkArea(mon);
+            const newX  = wa.x + targetZone.x;
+            const newY  = wa.y + targetZone.y;
             const zoneId = targetZone.name || JSON.stringify(targetZone);
 
-            // Remove from any other zone lists
+            // Remove from other zones
             for (const zid of Object.keys(this._snappedWindows)) {
-                this._snappedWindows[zid] = this._snappedWindows[zid]
-                    .filter(w => w !== window);
+                this._snappedWindows[zid] =
+                    this._snappedWindows[zid].filter(w => w !== window);
             }
 
-            // Add to this zone’s list
+            // Add to this zone
             this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
             this._snappedWindows[zoneId].push(window);
 
-            // Tag window and reset that zone’s index
+            // Tag + reset index
             window._autoZonerZoneId       = zoneId;
             this._cycleIndexByZone[zoneId] = 0;
 
@@ -146,20 +148,35 @@ export class WindowManager {
         const zoneId = focus._autoZonerZoneId;
         const list   = this._snappedWindows[zoneId] || [];
         if (list.length < 2) {
-            log('cycle', `Zone "${zoneId}" has ${list.length} window(s); nothing to do.`);
+            log('cycle', `Zone "${zoneId}" has ${list.length} window(s); skipping.`);
             return;
         }
 
-        // Initialize or advance index
-        let idx = this._cycleIndexByZone[zoneId] ?? -1;
-        idx = (idx + 1) % list.length;
+        // Advance & wrap index
+        let idx = (this._cycleIndexByZone[zoneId] + 1) % list.length;
         this._cycleIndexByZone[zoneId] = idx;
-
         const nextWin = list[idx];
-        log('cycle', `Activating [${idx}] "${nextWin.get_title()}" in zone "${zoneId}".`);
 
-        if (nextWin && !nextWin.minimized)
-            nextWin.activate(global.get_current_time());
+        log('cycle', `Animating to [${idx}] "${nextWin.get_title()}" in zone "${zoneId}".`);
+
+        // Find the actor for that window
+        const actor = global.get_window_actors()
+            .find(a => a.get_meta_window() === nextWin);
+        if (actor) {
+            // Slide in from off-screen bottom
+            const mon  = nextWin.get_monitor();
+            const wa   = Main.layoutManager.getWorkAreaForMonitor(mon);
+            const finalY = actor.get_y();
+            actor.set_y(wa.y + wa.height + 10);
+            actor.ease({
+                y:        finalY,
+                duration: 300,
+                mode:     Clutter.AnimationMode.EASE_OUT_QUAD,
+            });
+        }
+
+        // Finally activate
+        nextWin.activate(global.get_current_time());
     }
 
     cleanupWindowProperties() {
