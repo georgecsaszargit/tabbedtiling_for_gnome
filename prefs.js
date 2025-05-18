@@ -9,12 +9,12 @@ import Gdk from 'gi://Gdk';
 import { ExtensionPreferences, gettext as _ } from
        'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-const ZONE_SETTINGS_KEY             = 'zones';
-const ENABLE_ZONING_KEY             = 'enable-auto-zoning';
-const RESTORE_ON_UNTILE_KEY         = 'restore-original-size-on-untile';
-const TILE_NEW_WINDOWS_KEY          = 'tile-new-windows';
-const HIGHLIGHT_ON_HOVER_KEY        = 'highlight-on-hover';
-const CYCLE_ACCELERATOR_KEY         = 'cycle-zone-windows-accelerator';
+const ZONE_SETTINGS_KEY        = 'zones';
+const ENABLE_ZONING_KEY        = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY    = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY     = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY   = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY    = 'cycle-zone-windows-accelerator';
 
 const log = msg => console.log(`[AutoZonerPrefs] ${msg}`);
 
@@ -57,20 +57,20 @@ class ZoneEditorGrid extends Gtk.Grid {
 
         // X, Y, Width, Height
         const fields = [
-            { label: _('X:'),     key: 'x' },
-            { label: _('Y:'),     key: 'y' },
-            { label: _('Width:'), key: 'width' },
-            { label: _('Height:'),key: 'height' }
+            { label: _('X:'),      key: 'x' },
+            { label: _('Y:'),      key: 'y' },
+            { label: _('Width:'),  key: 'width' },
+            { label: _('Height:'), key: 'height' }
         ];
-        fields.forEach((field, i) => {
+        fields.forEach((f, i) => {
             const row = Math.floor(i / 2) + 2;
             const col = (i % 2) * 2;
-            this.attach(new Gtk.Label({ label: field.label, halign: Gtk.Align.END }), col, row, 1, 1);
+            this.attach(new Gtk.Label({ label: f.label, halign: Gtk.Align.END }), col, row, 1, 1);
             const spin = Gtk.SpinButton.new_with_range(0, 10000, 10);
-            spin.set_value(this._zone[field.key] || 0);
+            spin.set_value(this._zone[f.key] || 0);
             spin.set_hexpand(true);
             spin.connect('value-changed', () => {
-                this._zone[field.key] = spin.get_value_as_int();
+                this._zone[f.key] = spin.get_value_as_int();
                 this.emit('changed');
             });
             this.attach(spin, col + 1, row, 1, 1);
@@ -91,11 +91,11 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         const display      = Gdk.Display.get_default();
         const monitorCount = display.get_monitors().get_n_items();
 
-        // Create page
+        // Preferences page
         const page = new Adw.PreferencesPage();
         window.add(page);
 
-        // --- General Settings Group ---
+        // General Settings Group
         const generalGroup = new Adw.PreferencesGroup({ title: _('General Settings') });
         page.add(generalGroup);
 
@@ -143,29 +143,31 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         tileRow.add_suffix(tileSwitch);
         generalGroup.add(tileRow);
 
-        // --- Cycle Zone Windows Shortcut (manual entry) ---
+        // Cycle Zone Windows Shortcut (manual entry)
         const accelEntry = new Gtk.Entry({
             hexpand: true,
-            placeholder_text: '<Control>8'
+            placeholder_text: '<Control><Alt>8'
         });
-        // Load existing accelerator (first element of array)
+        // Load existing accelerator
         const existing = this._settings.get_strv(CYCLE_ACCELERATOR_KEY);
         accelEntry.set_text(existing[0] || '');
         // Save on Enter
         accelEntry.connect('activate', () => {
             const text = accelEntry.get_text().trim();
-            this._settings.set_strv(CYCLE_ACCELERATOR_KEY, [ text ]);
-            log(`Saved cycle shortcut: ${text}`);
+            if (text) {
+                this._settings.set_strv(CYCLE_ACCELERATOR_KEY, [ text ]);
+                log(`Saved cycle shortcut: ${text}`);
+            }
         });
         const accelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Shortcut'),
-            subtitle: _('Type the accelerator string (e.g. <Control>8) then press Enter'),
+            subtitle: _('Type the accelerator string (e.g. <Control><Alt>8) then press Enter'),
             activatable_widget: accelEntry
         });
         accelRow.add_suffix(accelEntry);
         generalGroup.add(accelRow);
 
-        // --- Zone Definitions Group ---
+        // Zone Definitions Group
         this._zonesGroup = new Adw.PreferencesGroup({
             title: _('Zone Definitions'),
             description: _('Define screen areas where windows will tile automatically.')
@@ -188,7 +190,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
     }
 
     _loadZonesToUI(monitorCount) {
-        // Remove any existing ExpanderRows
+        // Remove existing ExpanderRows
         let child = this._zonesGroup.get_first_child();
         while (child) {
             const next = child.get_next_sibling();
@@ -197,7 +199,6 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
             child = next;
         }
 
-        // Parse JSON from settings
         let zones = [];
         try {
             zones = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY));
@@ -207,7 +208,6 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
             zones = [];
         }
 
-        // Add one ExpanderRow per zone
         zones.forEach(zoneData => this._createAndAddZoneExpander(zoneData, monitorCount));
     }
 
@@ -219,7 +219,6 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         expanderRow.add_row(editorGrid);
 
-        // Remove button
         const removeButton = new Gtk.Button({
             icon_name: 'edit-delete-symbolic',
             valign: Gtk.Align.CENTER,
@@ -229,7 +228,6 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         expanderRow.add_suffix(removeButton);
         expanderRow.set_enable_expansion(true);
 
-        // Save on edits
         editorGrid.connect('changed', () => {
             const cd = editorGrid.get_zone_data();
             expanderRow.title    = cd.name || _('Unnamed Zone');
@@ -237,7 +235,6 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
             this._saveZones();
         });
 
-        // Confirm removal
         removeButton.connect('clicked', () => {
             const dialog = new Adw.MessageDialog({
                 heading: _("Remove Zone?"),
@@ -258,7 +255,6 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
             dialog.present();
         });
 
-        // Insert before Add button
         if (this._addButtonRow)
             this._zonesGroup.add_before(expanderRow, this._addButtonRow);
         else

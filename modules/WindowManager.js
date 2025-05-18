@@ -1,7 +1,6 @@
 // modules/WindowManager.js
 
 import Meta from 'gi://Meta';
-import GLib from 'gi://GLib';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { ZoneDetector } from './ZoneDetector.js';
@@ -10,15 +9,15 @@ const log = (p, msg) => console.log(`[AutoZoner.WindowManager.${p}] ${msg}`);
 
 export class WindowManager {
     constructor(settingsManager, highlightManager) {
-        this._settingsManager    = settingsManager;
-        this._highlightManager   = highlightManager;
-        this._zoneDetector       = new ZoneDetector();
-        this._signalConnections  = [];
+        this._settingsManager   = settingsManager;
+        this._highlightManager  = highlightManager;
+        this._zoneDetector      = new ZoneDetector();
+        this._signalConnections = [];
 
-        // Tracking snapped windows per zone
-        this._snappedWindows     = {};  // { zoneId: [metaWindow, …] }
-        this._cycleIndexByZone   = {};  // { zoneId: currentIndex }
-        this._currentZoneId      = null;
+        // Windows grouped by zoneId
+        this._snappedWindows    = {};  
+        // Current cycle index in each zone
+        this._cycleIndexByZone  = {};
 
         log('constructor', 'Initialized.');
     }
@@ -27,7 +26,7 @@ export class WindowManager {
         this._disconnectSignals();
 
         if (!this._settingsManager.isZoningEnabled()) {
-            log('connectSignals', 'Zoning disabled, skipping signals.');
+            log('connectSignals', 'Zoning disabled.');
             return;
         }
 
@@ -38,9 +37,8 @@ export class WindowManager {
         log('connectSignals', 'Signals connected.');
     }
 
-    // Stub so we don’t crash on window-created
     _onWindowCreated(display, window) {
-        // no-op for now
+        // no-op stub
     }
 
     _connect(gobj, name, cb) {
@@ -51,9 +49,9 @@ export class WindowManager {
     _disconnectSignals() {
         this._signalConnections.forEach(({ gobj, id }) => {
             try {
-                if (gobj.is_connected && gobj.is_connected(id))
+                if (gobj.is_connected?.(id))
                     gobj.disconnect(id);
-                else if (gobj.disconnect)
+                else
                     gobj.disconnect(id);
             } catch (e) {
                 log('_disconnectSignals', `Error: ${e}`);
@@ -64,9 +62,9 @@ export class WindowManager {
 
     _getMonitorWorkArea(mon) {
         const lm = Main.layoutManager;
-        if (mon < 0 || mon >= lm.monitors.length)
-            return lm.getWorkAreaForMonitor(lm.primaryIndex);
-        return lm.getWorkAreaForMonitor(mon);
+        return (mon < 0 || mon >= lm.monitors.length)
+            ? lm.getWorkAreaForMonitor(lm.primaryIndex)
+            : lm.getWorkAreaForMonitor(mon);
     }
 
     _onGrabOpBegin(display, window, op) {
@@ -89,13 +87,14 @@ export class WindowManager {
         if (!this._settingsManager.isZoningEnabled()) return;
         if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) {
             delete window._autoZonerIsZoned;
+            delete window._autoZonerZoneId;
             return;
         }
 
         const { x, y, width, height } = window.get_frame_rect();
         const center = { x: x + width/2, y: y + height/2 };
-        const mon = window.get_monitor();
-        const zones = this._settingsManager.getZones();
+        const mon     = window.get_monitor();
+        const zones   = this._settingsManager.getZones();
         const targetZone = this._zoneDetector.findTargetZone(zones, center, mon);
 
         if (targetZone) {
@@ -105,13 +104,20 @@ export class WindowManager {
             const wa   = this._getMonitorWorkArea(mon);
             const newX = wa.x + targetZone.x;
             const newY = wa.y + targetZone.y;
-
             const zoneId = targetZone.name || JSON.stringify(targetZone);
-            this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
-            if (!this._snappedWindows[zoneId].includes(window))
-                this._snappedWindows[zoneId].push(window);
 
-            this._currentZoneId            = zoneId;
+            // Remove from any other zone lists
+            for (const zid of Object.keys(this._snappedWindows)) {
+                this._snappedWindows[zid] = this._snappedWindows[zid]
+                    .filter(w => w !== window);
+            }
+
+            // Add to this zone’s list
+            this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
+            this._snappedWindows[zoneId].push(window);
+
+            // Tag window and reset that zone’s index
+            window._autoZonerZoneId       = zoneId;
             this._cycleIndexByZone[zoneId] = 0;
 
             window.move_resize_frame(false, newX, newY, targetZone.width, targetZone.height);
@@ -126,18 +132,32 @@ export class WindowManager {
                 log('_onGrabOpEnd', `Restored "${window.get_title()}"`);
             }
             delete window._autoZonerIsZoned;
+            delete window._autoZonerZoneId;
         }
     }
 
     cycleWindowsInCurrentZone() {
-        const id   = this._currentZoneId;
-        const list = this._snappedWindows[id] || [];
-        if (list.length < 2) return;
+        const focus = global.display.focus_window;
+        if (!focus || !focus._autoZonerZoneId) {
+            log('cycle', 'No zoned window focused; aborting.');
+            return;
+        }
 
-        let idx = (this._cycleIndexByZone[id] + 1) % list.length;
-        this._cycleIndexByZone[id] = idx;
+        const zoneId = focus._autoZonerZoneId;
+        const list   = this._snappedWindows[zoneId] || [];
+        if (list.length < 2) {
+            log('cycle', `Zone "${zoneId}" has ${list.length} window(s); nothing to do.`);
+            return;
+        }
+
+        // Initialize or advance index
+        let idx = this._cycleIndexByZone[zoneId] ?? -1;
+        idx = (idx + 1) % list.length;
+        this._cycleIndexByZone[zoneId] = idx;
 
         const nextWin = list[idx];
+        log('cycle', `Activating [${idx}] "${nextWin.get_title()}" in zone "${zoneId}".`);
+
         if (nextWin && !nextWin.minimized)
             nextWin.activate(global.get_current_time());
     }
@@ -148,6 +168,7 @@ export class WindowManager {
             if (w) {
                 delete w._autoZonerIsZoned;
                 delete w._autoZonerOriginalRect;
+                delete w._autoZonerZoneId;
             }
         });
     }

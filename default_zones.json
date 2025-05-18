@@ -1,7 +1,7 @@
 [
   {
     "monitorIndex": 0,
-    "name": "Default Left Half (from file)",
+    "name": "Left",
     "x": 0,
     "y": 0,
     "width": 2560,
@@ -9,7 +9,7 @@
   },
   {
     "monitorIndex": 0,
-    "name": "Default Right Half (from file)",
+    "name": "center",
     "x": 2560,
     "y": 0,
     "width": 1280,
@@ -17,7 +17,7 @@
   },
    {
     "monitorIndex": 0,
-    "name": "Default Right Half (from file)",
+    "name": "Right",
     "x": 3840,
     "y": 0,
     "width": 1280,
