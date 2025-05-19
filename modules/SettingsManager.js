@@ -10,6 +10,11 @@ const TILE_NEW_WINDOWS_KEY               = 'tile-new-windows';
 const HIGHLIGHT_ON_HOVER_KEY             = 'highlight-on-hover';
 const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
 const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
+
+// New tab bar settings keys
+const TAB_BAR_HEIGHT_KEY                 = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                  = 'tab-font-size';
+
 const DEFAULT_ZONES_FILENAME             = 'default_zones.json';
 
 const log = (msg) => console.log(`[AutoZoner.SettingsManager] ${msg}`);
@@ -27,6 +32,8 @@ export class SettingsManager {
         this._connectSettingChange(ZONE_SETTINGS_KEY, () => this._loadZonesFromGSettings());
         this._connectSettingChange(CYCLE_ACCELERATOR_KEY, () => log('Cycle accelerator changed'));
         this._connectSettingChange(CYCLE_BACKWARD_ACCELERATOR_KEY, () => log('Backward cycle accelerator changed'));
+        this._connectSettingChange(TAB_BAR_HEIGHT_KEY, () => log('Tab bar height changed'));
+        this._connectSettingChange(TAB_FONT_SIZE_KEY, () => log('Tab font size changed'));
     }
 
     _loadDefaultZonesFromFileIfNeeded() {
@@ -106,6 +113,15 @@ export class SettingsManager {
     get cycleZoneWindowsBackwardAccelerator() {
         const arr = this._gsettings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY);
         return arr.length > 0 ? arr[0] : '';
+    }
+
+    // New getters for tab bar settings
+    getTabBarHeight() {
+        return this._gsettings.get_int(TAB_BAR_HEIGHT_KEY);
+    }
+
+    getTabFontSize() {
+        return this._gsettings.get_int(TAB_FONT_SIZE_KEY);
     }
 
     destroy() {

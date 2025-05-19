@@ -16,6 +16,8 @@ const TILE_NEW_WINDOWS_KEY               = 'tile-new-windows';
 const HIGHLIGHT_ON_HOVER_KEY             = 'highlight-on-hover';
 const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
 const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
+const TAB_BAR_HEIGHT_KEY                 = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                  = 'tab-font-size';
 
 const log = msg => console.log(`[AutoZonerPrefs] ${msg}`);
 
@@ -167,7 +169,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         const accelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Shortcut'),
-            subtitle: _('Type the accelerator string (e.g. &lt;Control&gt;&lt;Alt&gt;8) then press Enter'),
+            subtitle: _('Type the accelerator string (e.g. <Control><Alt>8) then press Enter'),
             activatable_widget: accelEntry
         });
         accelRow.add_suffix(accelEntry);
@@ -189,11 +191,39 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         const backwardAccelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Backward Shortcut'),
-            subtitle: _('Type the accelerator string (e.g. &lt;Control&gt;&lt;Alt&gt;9) then press Enter'),
+            subtitle: _('Type the accelerator string (e.g. <Control><Alt>9) then press Enter'),
             activatable_widget: backwardAccelEntry
         });
         backwardAccelRow.add_suffix(backwardAccelEntry);
         generalGroup.add(backwardAccelRow);
+
+        // Tab Bar Height
+        const heightSpin = Gtk.SpinButton.new_with_range(16, 200, 1);
+        heightSpin.set_value(this._settings.get_int(TAB_BAR_HEIGHT_KEY));
+        heightSpin.connect('value-changed', () => {
+            this._settings.set_int(TAB_BAR_HEIGHT_KEY, heightSpin.get_value_as_int());
+        });
+        const heightRow = new Adw.ActionRow({
+            title: _('Tab Bar Height'),
+            subtitle: _('Height in pixels for the tab bar'),
+            activatable_widget: heightSpin
+        });
+        heightRow.add_suffix(heightSpin);
+        generalGroup.add(heightRow);
+
+        // Tab Font Size
+        const fontSpin = Gtk.SpinButton.new_with_range(6, 72, 1);
+        fontSpin.set_value(this._settings.get_int(TAB_FONT_SIZE_KEY));
+        fontSpin.connect('value-changed', () => {
+            this._settings.set_int(TAB_FONT_SIZE_KEY, fontSpin.get_value_as_int());
+        });
+        const fontRow = new Adw.ActionRow({
+            title: _('Tab Font Size'),
+            subtitle: _('Font size in pixels for the tab labels'),
+            activatable_widget: fontSpin
+        });
+        fontRow.add_suffix(fontSpin);
+        generalGroup.add(fontRow);
 
         // Zone Definitions Group
         this._zonesGroup = new Adw.PreferencesGroup({

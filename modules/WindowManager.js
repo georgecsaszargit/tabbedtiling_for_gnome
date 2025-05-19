@@ -8,7 +8,6 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { ZoneDetector } from './ZoneDetector.js';
 import { TabBar }       from './TabBar.js';
 
-const TABBAR_HEIGHT = 32;
 const log = (p, msg) => console.log(`[AutoZoner.WindowManager.${p}] ${msg}`);
 
 export class WindowManager {
@@ -66,15 +65,19 @@ export class WindowManager {
     _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
         let bar = this._tabBars[zoneId];
         if (!bar) {
-            bar = new TabBar(zoneId, (win) => this._activateWindow(zoneId, win));
+            bar = new TabBar(zoneId, (win) => this._activateWindow(zoneId, win), this._settingsManager);
             this._tabBars[zoneId] = bar;
             Main.uiGroup.add_child(bar);
         }
-        const wa = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
-        const x  = wa.x + zoneDef.x;
-        const y  = wa.y;
+        const wa     = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+        const x      = wa.x + zoneDef.x;
+        const y      = wa.y;
+        const height = this._settingsManager.getTabBarHeight();
+
         bar.set_position(x, y);
-        bar.set_size(zoneDef.width, TABBAR_HEIGHT);
+        bar.set_size(zoneDef.width, height);
+        bar.set_style(`height: ${height}px;`);
+
         return bar;
     }
 
@@ -111,10 +114,11 @@ export class WindowManager {
             if (window.get_maximized())
                 window.unmaximize(Meta.MaximizeFlags.BOTH);
 
-            const wa        = Main.layoutManager.getWorkAreaForMonitor(mon);
-            const newX      = wa.x + targetZone.x;
-            const newY      = wa.y + targetZone.y + TABBAR_HEIGHT;
-            const newHeight = targetZone.height - TABBAR_HEIGHT;
+            const wa           = Main.layoutManager.getWorkAreaForMonitor(mon);
+            const barHeight    = this._settingsManager.getTabBarHeight();
+            const newX         = wa.x + targetZone.x;
+            const newY         = wa.y + targetZone.y + barHeight;
+            const newHeight    = targetZone.height - barHeight;
 
             // Remove from any other snapped lists
             Object.keys(this._snappedWindows).forEach(zid => {
@@ -166,7 +170,6 @@ export class WindowManager {
                     .removeWindow(window);
         }
     }
-
 
     cycleWindowsInCurrentZone() {
         const focus = global.display.focus_window;
@@ -243,7 +246,6 @@ export class WindowManager {
         prevWin.raise();
         this._tabBars[zoneId]?.highlightWindow(prevWin);
     }
-
 
     _activateWindow(zoneId, window) {
         const now = global.get_current_time();

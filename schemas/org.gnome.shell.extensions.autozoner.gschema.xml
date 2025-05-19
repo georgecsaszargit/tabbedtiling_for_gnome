@@ -42,6 +42,18 @@
       <summary>Cycle Windows Backward</summary>
       <description>Keyboard shortcut to loop focus backward through windows in the active zone.</description>
     </key>
+
+    <key name="tab-bar-height" type="i">
+      <default>32</default>
+      <summary>Tab Bar Height</summary>
+      <description>Height in pixels of the tab bar.</description>
+    </key>
+
+    <key name="tab-font-size" type="i">
+      <default>13</default>
+      <summary>Tab Font Size</summary>
+      <description>Font size in pixels for the tab labels.</description>
+    </key>
   </schema>
 </schemalist>
 
