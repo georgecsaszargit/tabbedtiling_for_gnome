@@ -2,7 +2,6 @@
   "name": "Auto Zoner",
   "description": "Automatically tiles windows into predefined screen zones.",
   "uuid": "autozoner@georgecs.com",
-  "settings-schema": "org.gnome.shell.extensions.autozoner",
   "shell-version": ["45", "46", "47", "48"],
   "version": 1,
   "gettext-domain": "autozoner",

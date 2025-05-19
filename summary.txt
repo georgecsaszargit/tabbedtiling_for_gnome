@@ -48,6 +48,18 @@
       <summary>Cycle Windows Backward</summary>
       <description>Keyboard shortcut to loop focus backward through windows in the active zone.</description>
     </key>
+
+    <key name="tab-bar-height" type="i">
+      <default>32</default>
+      <summary>Tab Bar Height</summary>
+      <description>Height in pixels of the tab bar.</description>
+    </key>
+
+    <key name="tab-font-size" type="i">
+      <default>13</default>
+      <summary>Tab Font Size</summary>
+      <description>Font size in pixels for the tab labels.</description>
+    </key>
   </schema>
 </schemalist>
 
@@ -59,7 +71,6 @@
   "name": "Auto Zoner",
   "description": "Automatically tiles windows into predefined screen zones.",
   "uuid": "autozoner@georgecs.com",
-  "settings-schema": "org.gnome.shell.extensions.autozoner",
   "shell-version": ["45", "46", "47", "48"],
   "version": 1,
   "gettext-domain": "autozoner",
@@ -108,15 +119,24 @@ export default class AutoZonerExtension extends Extension {
         this._windowManager    = new WindowManager(this._settingsManager, this._highlightManager);
         this._indicator        = new Indicator(this.uuid, this._settingsManager, this);
 
+        // Connect our drag & keybinding signals
         this._windowManager.connectSignals();
+
+        // Immediately snap any existing windows into zones
+        this._windowManager.snapAllWindowsToZones();
+
+        // Watch for turning zoning on/off
         this._zoningChangedId = this._settingsManager.getGSettingObject().connect(
             `changed::${ENABLE_ZONING_KEY}`,
             () => {
                 this._windowManager.connectSignals();
+                if (this._settingsManager.isZoningEnabled())
+                    this._windowManager.snapAllWindowsToZones();
                 this._indicator.updateToggleState();
             }
         );
 
+        // Handle monitor changes (resize, add/remove)
         if (Main.layoutManager) {
             this._monitorsChangedId = Main.layoutManager.connect(
                 'monitors-changed',
@@ -124,9 +144,11 @@ export default class AutoZonerExtension extends Extension {
             );
         }
 
+        // Keyboard shortcuts
         this._addCycleKeybinding();
         this._addCycleBackwardKeybinding();
 
+        // Watch for rebind requests
         this._cycleAccelChangedId = this._settingsManager.getGSettingObject().connect(
             `changed::${CYCLE_ACCELERATOR_KEY}`,
             () => {
@@ -226,8 +248,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { ZoneDetector } from './ZoneDetector.js';
 import { TabBar }       from './TabBar.js';
 
-const TABBAR_HEIGHT = 32;
-const log = (p, msg) => console.log(`[AutoZoner.WindowManager.${p}] ${msg}`);
+const log = (context, msg) => console.log(`[AutoZoner.WindowManager.${context}] ${msg}`);
 
 export class WindowManager {
     constructor(settingsManager, highlightManager) {
@@ -236,7 +257,7 @@ export class WindowManager {
         this._zoneDetector      = new ZoneDetector();
         this._signalConnections = [];
 
-        this._snappedWindows    = {};  // zoneId → [windows]
+        this._snappedWindows    = {};  // zoneId → [Meta.Window]
         this._cycleIndexByZone  = {};  // zoneId → current index
         this._tabBars           = {};  // zoneId → TabBar instance
     }
@@ -266,7 +287,27 @@ export class WindowManager {
     }
 
     _onWindowCreated(display, window) {
-        // stub
+        if (!this._settingsManager.isZoningEnabled() ||
+            !this._settingsManager.isTileNewWindowsEnabled())
+            return;
+
+        if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
+            return;
+
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 100, () => { // Increased delay slightly for stability
+            if (window.is_destroyed()) return GLib.SOURCE_REMOVE;
+
+            const rect   = window.get_frame_rect();
+            const center = { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
+            const mon    = window.get_monitor();
+            const zones  = this._settingsManager.getZones();
+            const zoneDef = this._zoneDetector.findTargetZone(zones, center, mon);
+            if (zoneDef) {
+                this._snapWindowToZone(window, zoneDef, false); // isGrabOpContext = false
+                log('_onWindowCreated', `Auto-snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`);
+            }
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _onGrabOpBegin(display, window, op) {
@@ -277,114 +318,219 @@ export class WindowManager {
             window._autoZonerOriginalRect = window.get_frame_rect();
             log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}"`);
         }
-        if (this._highlightManager)
-            this._highlightManager.startUpdating();
+        this._highlightManager?.startUpdating();
+    }
+
+    _onGrabOpEnd(display, window, op) {
+        this._highlightManager?.stopUpdating();
+        if (!this._settingsManager.isZoningEnabled()) return;
+
+        if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) {
+            this._unsnapWindow(window);
+            return;
+        }
+
+        const [pointerX, pointerY] = global.get_pointer();
+        const hitRect = new Meta.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 });
+        let mon = global.display.get_monitor_index_for_rect(hitRect);
+        if (mon < 0)
+            mon = window.get_monitor(); // Fallback to window's current monitor
+        
+        // Ensure mon is valid, fallback to primary if necessary
+        if (mon < 0 || mon >= Main.layoutManager.monitors.length) {
+            mon = Main.layoutManager.primaryIndex;
+        }
+
+        const center = { x: pointerX, y: pointerY };
+        const zones  = this._settingsManager.getZones();
+        const zoneDef = this._zoneDetector.findTargetZone(zones, center, mon);
+
+        if (zoneDef) {
+            this._snapWindowToZone(window, zoneDef, true); // isGrabOpContext = true
+            log('_onGrabOpEnd', `Snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`);
+        } else {
+            this._unsnapWindow(window);
+        }
     }
 
     _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
         let bar = this._tabBars[zoneId];
         if (!bar) {
-            bar = new TabBar(zoneId, (win) => this._activateWindow(zoneId, win));
+            bar = new TabBar(zoneId, win => this._activateWindow(zoneId, win), this._settingsManager);
             this._tabBars[zoneId] = bar;
             Main.uiGroup.add_child(bar);
         }
-        const wa = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
-        const x  = wa.x + zoneDef.x;
-        const y  = wa.y;
+        const wa     = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+        const x      = wa.x + zoneDef.x;
+        // Tab bar Y position is always at the top of the work area for that zone's X extent.
+        const y      = wa.y; 
+        const height = this._settingsManager.getTabBarHeight();
+
         bar.set_position(x, y);
-        bar.set_size(zoneDef.width, TABBAR_HEIGHT);
+        bar.set_size(zoneDef.width, height);
+        bar.set_style(`height: ${height}px;`);
+
         return bar;
     }
 
-    _onGrabOpEnd(display, window, op) {
-        if (this._highlightManager)
-            this._highlightManager.stopUpdating();
+    snapAllWindowsToZones() {
         if (!this._settingsManager.isZoningEnabled()) return;
-        if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) {
-            delete window._autoZonerIsZoned;
-            delete window._autoZonerZoneId;
-            return;
-        }
+        const zones = this._settingsManager.getZones();
 
-        const { x, y, width, height } = window.get_frame_rect();
-        const center    = { x: x + width/2, y: y + height/2 };
-        const mon       = window.get_monitor();
-        const zones     = this._settingsManager.getZones();
-        const targetZone = this._zoneDetector.findTargetZone(zones, center, mon);
+        global.get_window_actors().forEach(actor => {
+            const win = actor.get_meta_window();
+            if (!win || win.is_fullscreen() || win.get_window_type() !== Meta.WindowType.NORMAL)
+                return;
 
-        if (targetZone) {
-            const zoneId = targetZone.name || JSON.stringify(targetZone);
-
-            // If moving from another zone, remove its tab there first
-            const oldZoneId = window._autoZonerZoneId;
-            if (oldZoneId && oldZoneId !== zoneId) {
-                const oldZoneDef = zones.find(z =>
-                    (z.name || JSON.stringify(z)) === oldZoneId
-                );
-                if (oldZoneDef)
-                    this._getZoneTabBar(oldZoneId, oldZoneDef.monitorIndex, oldZoneDef)
-                        .removeWindow(window);
+            const rect   = win.get_frame_rect();
+            const center = { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
+            const mon    = win.get_monitor();
+            
+            let currentMonitorIndex = mon;
+            if (currentMonitorIndex < 0 || currentMonitorIndex >= Main.layoutManager.monitors.length) {
+                 currentMonitorIndex = Main.layoutManager.primaryIndex;
             }
 
-            if (window.get_maximized())
-                window.unmaximize(Meta.MaximizeFlags.BOTH);
-
-            const wa        = Main.layoutManager.getWorkAreaForMonitor(mon);
-            const newX      = wa.x + targetZone.x;
-            const newY      = wa.y + targetZone.y + TABBAR_HEIGHT;
-            const newHeight = targetZone.height - TABBAR_HEIGHT;
-
-            // Remove from any other snapped lists
-            Object.keys(this._snappedWindows).forEach(zid => {
-                this._snappedWindows[zid] =
-                    this._snappedWindows[zid].filter(w => w !== window);
-            });
-
-            // Add to this zone
-            this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
-            this._snappedWindows[zoneId].push(window);
-            this._cycleIndexByZone[zoneId] = 0;
-            window._autoZonerIsZoned = true;
-            window._autoZonerZoneId  = zoneId;
-
-            // Resize & move below tab bar
-            window.move_resize_frame(
-                false,
-                newX, newY,
-                targetZone.width, newHeight
-            );
-
-            // Update this zone's tab bar
-            const tabBar = this._getZoneTabBar(zoneId, mon, targetZone);
-            tabBar.addWindow(window);
-
-            log('_onGrabOpEnd', `Snapped "${window.get_title()}" into zone "${zoneId}"`);
-        }
-        else if (window._autoZonerIsZoned) {
-            // Leaving all zones: remove tab and restore
-            const oldZoneId = window._autoZonerZoneId;
-            if (this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
-                const o = window._autoZonerOriginalRect;
-                window.move_resize_frame(false, o.x, o.y, o.width, o.height);
-                delete window._autoZonerOriginalRect;
-                log('_onGrabOpEnd', `Restored "${window.get_title()}"`);
+            let zoneDef = this._zoneDetector.findTargetZone(zones, center, currentMonitorIndex);
+            if (!zoneDef) { // Fallback: find closest zone on the window's monitor
+                const wa = Main.layoutManager.getWorkAreaForMonitor(currentMonitorIndex);
+                let best, bestDist = Infinity;
+                zones.filter(z => z.monitorIndex === currentMonitorIndex).forEach(z => {
+                    const zx = wa.x + z.x + z.width/2;
+                    const zy = wa.y + z.y + z.height/2; // Zone center
+                    const dx = zx - center.x, dy = zy - center.y;
+                    const d2 = dx*dx + dy*dy;
+                    if (d2 < bestDist) { bestDist = d2; best = z; }
+                });
+                zoneDef = best;
             }
 
-            delete window._autoZonerIsZoned;
-            delete window._autoZonerZoneId;
-
-            this._snappedWindows[oldZoneId] =
-                (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
-
-            const oldZoneDef = zones.find(z =>
-                (z.name || JSON.stringify(z)) === oldZoneId
-            );
-            if (oldZoneDef)
-                this._getZoneTabBar(oldZoneId, oldZoneDef.monitorIndex, oldZoneDef)
-                    .removeWindow(window);
-        }
+            if (zoneDef)
+                this._snapWindowToZone(win, zoneDef, false); // isGrabOpContext = false
+        });
     }
 
+    _snapWindowToZone(window, zoneDef, isGrabOpContext = false) {
+        const zoneId = zoneDef.name || JSON.stringify(zoneDef);
+
+        const oldZoneId = window._autoZonerZoneId;
+        if (oldZoneId && oldZoneId !== zoneId) {
+            const oldDef = this._settingsManager.getZones()
+                            .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
+            if (oldDef) {
+                this._getZoneTabBar(oldZoneId, oldDef.monitorIndex, oldDef)
+                    .removeWindow(window);
+                this._snappedWindows[oldZoneId] =
+                    (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
+            }
+        }
+
+        if (window.get_maximized && window.get_maximized())
+            window.unmaximize(Meta.MaximizeFlags.BOTH);
+
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect)
+            window._autoZonerOriginalRect = window.get_frame_rect();
+
+        this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
+        if (!this._snappedWindows[zoneId].includes(window))
+            this._snappedWindows[zoneId].push(window);
+        this._cycleIndexByZone[zoneId] = (this._snappedWindows[zoneId].length - 1); // New window goes to end of cycle
+        window._autoZonerIsZoned = true;
+        window._autoZonerZoneId  = zoneId;
+
+        const wa        = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
+        const barHeight = this._settingsManager.getTabBarHeight();
+
+        const actualZoneYInWorkArea = zoneDef.y;
+        // Clip zone's top to be within workArea (Y=0 of workArea is the earliest it can start)
+        const clippedZoneYInWorkArea = Math.max(0, actualZoneYInWorkArea);
+        // Calculate how much of the zone's defined top edge is "lost" by being above the workArea's top edge
+        const yClippage = clippedZoneYInWorkArea - actualZoneYInWorkArea; // This is >= 0
+
+        const targetX = wa.x + zoneDef.x;
+        // Window Y: starts at workArea.y + (clipped)zoneDef.y + barHeight
+        const targetY = wa.y + clippedZoneYInWorkArea + barHeight;
+        const targetW = zoneDef.width;
+        // Window H: zoneDef.height - any part of zone above workArea - barHeight
+        let targetH = zoneDef.height - yClippage - barHeight;
+        
+        // Ensure targetH is not excessively small or negative
+        targetH = Math.max(targetH, 50); // Ensure a minimum height of 50px
+
+        window.move_resize_frame(false, targetX, targetY, targetW, targetH);
+
+        if (!isGrabOpContext) {
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
+                if (window && !window.is_destroyed() && window._autoZonerZoneId === zoneId &&
+                    window.get_maximized() === Meta.MaximizeFlags.NONE && !window.is_fullscreen()) {
+                    
+                    const currentRect = window.get_frame_rect();
+                    
+                    // Re-fetch WA and barHeight for the check, in case settings changed
+                    const checkWa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
+                    const checkBarHeight = this._settingsManager.getTabBarHeight();
+
+                    const check_actualZoneYInWorkArea = zoneDef.y;
+                    const check_clippedZoneYInWorkArea = Math.max(0, check_actualZoneYInWorkArea);
+                    const check_yClippage = check_clippedZoneYInWorkArea - check_actualZoneYInWorkArea;
+
+                    const checkTargetX = checkWa.x + zoneDef.x;
+                    const checkTargetY = checkWa.y + check_clippedZoneYInWorkArea + checkBarHeight;
+                    const checkTargetW = zoneDef.width;
+                    let checkTargetH = zoneDef.height - check_yClippage - checkBarHeight;
+                    checkTargetH = Math.max(checkTargetH, 50);
+
+                    if (currentRect.x !== checkTargetX || currentRect.y !== checkTargetY ||
+                        currentRect.width !== checkTargetW || currentRect.height !== checkTargetH) {
+                        
+                        log('_snapWindowToZone[DelayedCheck]', `Window "${window.get_title()}" position/size mismatch. ` +
+                            `Current: X=${currentRect.x},Y=${currentRect.y},W=${currentRect.width},H=${currentRect.height}. ` +
+                            `Target: X=${checkTargetX},Y=${checkTargetY},W=${checkTargetW},H=${checkTargetH}. Re-applying.`);
+                        window.move_resize_frame(false, checkTargetX, checkTargetY, checkTargetW, checkTargetH);
+                    }
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+
+        const tabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
+        tabBar.addWindow(window);
+        // After adding, ensure the new window (which is likely active) is highlighted in tab bar
+        this._activateWindow(zoneId, window); 
+    }
+
+    _unsnapWindow(window) {
+        const oldZoneId = window._autoZonerZoneId;
+        if (!oldZoneId) return;
+
+        if (this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
+            const o = window._autoZonerOriginalRect;
+            window.move_resize_frame(false, o.x, o.y, o.width, o.height);
+            delete window._autoZonerOriginalRect;
+        }
+
+        delete window._autoZonerIsZoned;
+        delete window._autoZonerZoneId;
+
+        const oldDef = this._settingsManager.getZones()
+                          .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
+        if (oldDef) {
+            this._getZoneTabBar(oldZoneId, oldDef.monitorIndex, oldDef)
+                .removeWindow(window);
+        }
+
+        this._snappedWindows[oldZoneId] =
+            (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
+        
+        // If zone becomes empty, destroy its tab bar
+        if (this._snappedWindows[oldZoneId] && this._snappedWindows[oldZoneId].length === 0) {
+            if (this._tabBars[oldZoneId]) {
+                this._tabBars[oldZoneId].destroy();
+                delete this._tabBars[oldZoneId];
+            }
+            delete this._cycleIndexByZone[oldZoneId];
+        }
+    }
 
     cycleWindowsInCurrentZone() {
         const focus = global.display.focus_window;
@@ -405,23 +551,7 @@ export class WindowManager {
         const nextWin = list[idx];
 
         log('cycle', `Animating to [${idx}] "${nextWin.get_title()}" in zone "${zoneId}".`);
-
-        const actor = global.get_window_actors()
-            .find(a => a.get_meta_window() === nextWin);
-        if (actor) {
-            const wa     = Main.layoutManager.getWorkAreaForMonitor(nextWin.get_monitor());
-            const finalY = actor.get_y();
-            actor.set_y(wa.y + wa.height + 10);
-            actor.ease({
-                y:        finalY,
-                duration: 300,
-                mode:     Clutter.AnimationMode.EASE_OUT_QUAD,
-            });
-        }
-
-        nextWin.activate(global.get_current_time());
-        nextWin.raise();
-        this._tabBars[zoneId]?.highlightWindow(nextWin);
+        this._activateWindow(zoneId, nextWin); // Also handles animation and raising
     }
 
     cycleWindowsInCurrentZoneBackward() {
@@ -443,30 +573,27 @@ export class WindowManager {
         const prevWin = list[idx];
 
         log('cycle-backward', `Animating backward to [${idx}] "${prevWin.get_title()}" in zone "${zoneId}".`);
-
-        const actor = global.get_window_actors()
-            .find(a => a.get_meta_window() === prevWin);
-        if (actor) {
-            const wa     = Main.layoutManager.getWorkAreaForMonitor(prevWin.get_monitor());
-            const finalY = actor.get_y();
-            actor.set_y(wa.y - actor.get_height() - 10);
-            actor.ease({
-                y:        finalY,
-                duration: 300,
-                mode:     Clutter.AnimationMode.EASE_OUT_QUAD,
-            });
-        }
-
-        prevWin.activate(global.get_current_time());
-        prevWin.raise();
-        this._tabBars[zoneId]?.highlightWindow(prevWin);
+        this._activateWindow(zoneId, prevWin); // Also handles animation and raising
     }
 
-
     _activateWindow(zoneId, window) {
+        // Find current index of this window for cycle memory
+        const list = this._snappedWindows[zoneId] || [];
+        const currentWindowIndex = list.indexOf(window);
+        if (currentWindowIndex !== -1) {
+            this._cycleIndexByZone[zoneId] = currentWindowIndex;
+        }
+        
+        const actor = global.get_window_actors().find(a => a.get_meta_window() === window);
+        if (actor) {
+            // Simple raise, activation will bring to front
+            // Animation can be added here if desired, similar to cycle functions
+        }
+        
         const now = global.get_current_time();
-        window.activate(now);
-        window.raise();
+        window.activate(now); // This should raise it as well
+        // window.raise(); // May not be needed if activate works reliably
+
         this._tabBars[zoneId]?.highlightWindow(window);
     }
 
@@ -484,10 +611,10 @@ export class WindowManager {
     destroy() {
         this._disconnectSignals();
         Object.values(this._tabBars).forEach(bar => bar.destroy());
+        this._tabBars = {};
         log('destroy', 'Destroyed.');
     }
 }
-
 
 
 
@@ -553,13 +680,23 @@ export class ZoneDetector {
 import St from 'gi://St';
 import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
+import Shell from 'gi://Shell';
 
+/**
+ * A horizontal tab bar for a single zone.
+ * Shows one button per window, highlighting the active one.
+ */
 export class TabBar extends St.BoxLayout {
     static {
         GObject.registerClass(this);
     }
 
-    constructor(zoneId, onTabClicked) {
+    /**
+     * @param {string} zoneId
+     * @param {function(Meta.Window)} onTabClicked
+     * @param {object} settingsManager
+     */
+    constructor(zoneId, onTabClicked, settingsManager) {
         super({
             style_class: 'zone-tab-bar',
             vertical: false,
@@ -568,30 +705,60 @@ export class TabBar extends St.BoxLayout {
             reactive: true,
         });
 
-        this._zoneId = zoneId;
-        this._onTabClicked = onTabClicked;
-        this._tabs = [];        // holds { window, actor }
-        this.visible = false;
-        this.opacity = 255;
+        this._zoneId          = zoneId;
+        this._onTabClicked    = onTabClicked;
+        this._settingsManager = settingsManager;
+        this._tabs            = [];   // holds { window, actor }
+        this.visible          = false;
+        this.opacity          = 255;
     }
 
+    /**
+     * Adds a tab for `window`, or just highlights if already present.
+     * @param {Meta.Window} window
+     */
     addWindow(window) {
-        // Prevent duplicate tabs
         if (this._tabs.some(t => t.window === window)) {
             this.highlightWindow(window);
             return;
         }
 
-        const title = window.get_title();
+        // Try to resolve a proper app name
+        const wmClass   = window.get_wm_class();      // e.g. "org.gnome.Nautilus" or "google-chrome"
+        const appSystem = Shell.AppSystem.get_default();
+        let app         = appSystem.lookup_app(wmClass) ||
+                          appSystem.lookup_app(`${wmClass}.desktop`) ||
+                          appSystem.lookup_app(wmClass.toLowerCase()) ||
+                          appSystem.lookup_app(`${wmClass.toLowerCase()}.desktop`);
+
+        let label;
+        if (app) {
+            label = app.get_name();
+        } else if (wmClass) {
+            // Title-case a hyphen/underscore-separated class as a fallback
+            label = wmClass
+                .replace(/[-_.]+/g, ' ')
+                .split(' ')
+                .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(' ');
+        } else {
+            // Last resort: the window's title
+            label = window.get_title();
+        }
+
         const tab = new St.Button({
             style_class: 'zone-tab',
-            label: title,
-            reactive: true,
-            x_expand: false,
-            y_expand: false,
+            label:       label,
+            reactive:    true,
+            x_expand:    false,
+            y_expand:    false,
         });
 
-        tab.connect('button-press-event', (actor, event) => {
+        // Apply dynamic font size from settings
+        const fontSize = this._settingsManager.getTabFontSize();
+        tab.set_style(`font-size: ${fontSize}px;`);
+
+        tab.connect('button-press-event', () => {
             this._onTabClicked(window);
             return Clutter.EVENT_STOP;
         });
@@ -602,6 +769,10 @@ export class TabBar extends St.BoxLayout {
         this.highlightWindow(window);
     }
 
+    /**
+     * Removes the tab for `window`.
+     * @param {Meta.Window} window
+     */
     removeWindow(window) {
         const idx = this._tabs.findIndex(t => t.window === window);
         if (idx >= 0) {
@@ -614,20 +785,22 @@ export class TabBar extends St.BoxLayout {
         }
     }
 
+    /**
+     * Highlights only the tab corresponding to `window`.
+     * @param {Meta.Window} window
+     */
     highlightWindow(window) {
         this._tabs.forEach(({ window: w, actor }) => {
-            if (w === window) {
-                actor.add_style_pseudo_class('active');
-            } else {
-                actor.remove_style_pseudo_class('active');
-            }
+            if (w === window)
+                actor.add_style_class_name('active');
+            else
+                actor.remove_style_class_name('active');
         });
     }
 
     destroy() {
-        if (this.get_parent()) {
+        if (this.get_parent())
             this.get_parent().remove_child(this);
-        }
         super.destroy();
     }
 }
@@ -648,6 +821,11 @@ const TILE_NEW_WINDOWS_KEY               = 'tile-new-windows';
 const HIGHLIGHT_ON_HOVER_KEY             = 'highlight-on-hover';
 const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
 const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
+
+// New tab bar settings keys
+const TAB_BAR_HEIGHT_KEY                 = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                  = 'tab-font-size';
+
 const DEFAULT_ZONES_FILENAME             = 'default_zones.json';
 
 const log = (msg) => console.log(`[AutoZoner.SettingsManager] ${msg}`);
@@ -665,6 +843,8 @@ export class SettingsManager {
         this._connectSettingChange(ZONE_SETTINGS_KEY, () => this._loadZonesFromGSettings());
         this._connectSettingChange(CYCLE_ACCELERATOR_KEY, () => log('Cycle accelerator changed'));
         this._connectSettingChange(CYCLE_BACKWARD_ACCELERATOR_KEY, () => log('Backward cycle accelerator changed'));
+        this._connectSettingChange(TAB_BAR_HEIGHT_KEY, () => log('Tab bar height changed'));
+        this._connectSettingChange(TAB_FONT_SIZE_KEY, () => log('Tab font size changed'));
     }
 
     _loadDefaultZonesFromFileIfNeeded() {
@@ -744,6 +924,15 @@ export class SettingsManager {
     get cycleZoneWindowsBackwardAccelerator() {
         const arr = this._gsettings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY);
         return arr.length > 0 ? arr[0] : '';
+    }
+
+    // New getters for tab bar settings
+    getTabBarHeight() {
+        return this._gsettings.get_int(TAB_BAR_HEIGHT_KEY);
+    }
+
+    getTabFontSize() {
+        return this._gsettings.get_int(TAB_FONT_SIZE_KEY);
     }
 
     destroy() {
@@ -1147,6 +1336,8 @@ const TILE_NEW_WINDOWS_KEY               = 'tile-new-windows';
 const HIGHLIGHT_ON_HOVER_KEY             = 'highlight-on-hover';
 const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
 const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
+const TAB_BAR_HEIGHT_KEY                 = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                  = 'tab-font-size';
 
 const log = msg => console.log(`[AutoZonerPrefs] ${msg}`);
 
@@ -1298,7 +1489,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         const accelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Shortcut'),
-            subtitle: _('Type the accelerator string (e.g. &lt;Control&gt;&lt;Alt&gt;8) then press Enter'),
+            subtitle: _('Type the accelerator string (e.g. <Control><Alt>8) then press Enter'),
             activatable_widget: accelEntry
         });
         accelRow.add_suffix(accelEntry);
@@ -1320,11 +1511,39 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         const backwardAccelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Backward Shortcut'),
-            subtitle: _('Type the accelerator string (e.g. &lt;Control&gt;&lt;Alt&gt;9) then press Enter'),
+            subtitle: _('Type the accelerator string (e.g. <Control><Alt>9) then press Enter'),
             activatable_widget: backwardAccelEntry
         });
         backwardAccelRow.add_suffix(backwardAccelEntry);
         generalGroup.add(backwardAccelRow);
+
+        // Tab Bar Height
+        const heightSpin = Gtk.SpinButton.new_with_range(16, 200, 1);
+        heightSpin.set_value(this._settings.get_int(TAB_BAR_HEIGHT_KEY));
+        heightSpin.connect('value-changed', () => {
+            this._settings.set_int(TAB_BAR_HEIGHT_KEY, heightSpin.get_value_as_int());
+        });
+        const heightRow = new Adw.ActionRow({
+            title: _('Tab Bar Height'),
+            subtitle: _('Height in pixels for the tab bar'),
+            activatable_widget: heightSpin
+        });
+        heightRow.add_suffix(heightSpin);
+        generalGroup.add(heightRow);
+
+        // Tab Font Size
+        const fontSpin = Gtk.SpinButton.new_with_range(6, 72, 1);
+        fontSpin.set_value(this._settings.get_int(TAB_FONT_SIZE_KEY));
+        fontSpin.connect('value-changed', () => {
+            this._settings.set_int(TAB_FONT_SIZE_KEY, fontSpin.get_value_as_int());
+        });
+        const fontRow = new Adw.ActionRow({
+            title: _('Tab Font Size'),
+            subtitle: _('Font size in pixels for the tab labels'),
+            activatable_widget: fontSpin
+        });
+        fontRow.add_suffix(fontSpin);
+        generalGroup.add(fontRow);
 
         // Zone Definitions Group
         this._zonesGroup = new Adw.PreferencesGroup({
