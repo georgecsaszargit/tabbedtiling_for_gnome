@@ -1,7 +1,7 @@
 // modules/WindowManager.js
 
-import Meta    from 'gi://Meta';
-import GLib    from 'gi://GLib';
+import Meta from 'gi://Meta';
+import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -10,11 +10,15 @@ import { TabBar }       from './TabBar.js';
 
 const log = (context, msg) => console.log(`[AutoZoner.WindowManager.${context}] ${msg}`);
 
+const ZONE_GAP = 5; // Hardcoded 5px gap
+const GAP_POS_OFFSET = Math.floor(ZONE_GAP / 2); // Offset for position (e.g., 2px for 5px gap)
+const GAP_SIZE_REDUCTION = ZONE_GAP; // Total reduction for size (e.g., 5px for 5px gap)
+
 export class WindowManager {
     constructor(settingsManager, highlightManager) {
-        this._settingsManager   = settingsManager;
-        this._highlightManager  = highlightManager;
-        this._zoneDetector      = new ZoneDetector();
+        this._settingsManager  = settingsManager;
+        this._highlightManager = highlightManager;
+        this._zoneDetector     = new ZoneDetector();
         this._signalConnections = [];
 
         this._snappedWindows    = {};  // zoneId → [Meta.Window]
@@ -120,14 +124,15 @@ export class WindowManager {
             this._tabBars[zoneId] = bar;
             Main.uiGroup.add_child(bar);
         }
+        // Default positioning might be overridden later by _snapWindowToZone for gapping.
+        // For now, keep its own understanding of base position and size.
         const wa       = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
-        const x        = wa.x + zoneDef.x;
-        // Tab bar Y position is always at the top of the work area for that zone's X extent.
-        const y        = wa.y; 
-        const height = this._settingsManager.getTabBarHeight();
+        const x        = wa.x + zoneDef.x; // Initial X based on zoneDef
+        const y        = wa.y + Math.max(0, zoneDef.y); // Initial Y, clipped to workArea
+        const height   = this._settingsManager.getTabBarHeight();
 
-        bar.set_position(x, y);
-        bar.set_size(zoneDef.width, height); // Tab bar width will use zoneDef.width, may be visually wider than snapped window if window is clamped
+        bar.set_position(x, y); // This will be refined by the caller for gapping
+        bar.set_size(zoneDef.width, height); // This will be refined by the caller
         bar.set_style(`height: ${height}px;`);
 
         return bar;
@@ -176,7 +181,7 @@ export class WindowManager {
         const oldZoneId = window._autoZonerZoneId;
         if (oldZoneId && oldZoneId !== zoneId) {
             const oldDef = this._settingsManager.getZones()
-                                .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
+                                         .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
             if (oldDef) {
                 this._getZoneTabBar(oldZoneId, oldDef.monitorIndex, oldDef)
                     .removeWindow(window);
@@ -198,51 +203,52 @@ export class WindowManager {
         window._autoZonerIsZoned = true;
         window._autoZonerZoneId  = zoneId;
 
-        const wa        = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
-        const barHeight = this._settingsManager.getTabBarHeight();
-        const minWindowDim = 50; // Minimum width and height for a window
+        const wa             = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
+        const barHeight      = this._settingsManager.getTabBarHeight();
+        const minWindowDim   = 50; // Minimum width and height for a window
 
+        // --- Original Slot Calculations (X and Width) ---
+        const slotX = wa.x + zoneDef.x;
+        let desiredSlotW = zoneDef.width;
+        let maxAllowableSlotW = (wa.x + wa.width) - slotX;
+        let slotW = Math.min(desiredSlotW, maxAllowableSlotW);
+        slotW = Math.max(slotW, minWindowDim);
 
-        // --- X and Width Calculations ---
-        const targetX = wa.x + zoneDef.x; // Window's X position based on work area and zone's relative X
-        
-        let desiredWindowW = zoneDef.width; // Desired width from the zone definition
-        // Calculate maximum allowable width: from window's X position to the end of the work area
-        let maxAllowableWindowW = (wa.x + wa.width) - targetX; 
-        
-        // Final window width is the minimum of desired and allowable, constrained by a minimum practical width.
-        let targetW = Math.min(desiredWindowW, maxAllowableWindowW);
-        targetW = Math.max(targetW, minWindowDim);
-
-
-        // --- Y and Height Calculations (incorporating previous fix for height) ---
-        const actualZoneYInWorkArea = zoneDef.y; // Zone's Y relative to work area's Y=0
-        // Clip zone's top to be within workArea (Y=0 of workArea is the earliest it can start)
+        // --- Original Slot Calculations (Y and Height, for window content area) ---
+        const actualZoneYInWorkArea = zoneDef.y;
         const clippedZoneYInWorkArea = Math.max(0, actualZoneYInWorkArea);
-        // Calculate how much of the zone's defined top edge is "lost" by being above the workArea's top edge
         const yClippage = clippedZoneYInWorkArea - actualZoneYInWorkArea; // This is >= 0
 
-        // Window Y: starts at workArea.y + (clipped)zoneDef.y + barHeight
-        const targetY = wa.y + clippedZoneYInWorkArea + barHeight;
-        
-        // Desired window height based on zone definition, top clipping, and tab bar
-        let desiredWindowH = zoneDef.height - yClippage - barHeight;
-        // Calculate maximum possible window height so it doesn't extend beyond work area bottom.
-        let maxAllowableWindowH = (wa.y + wa.height) - targetY;
+        // Y where window content would start, after tab bar
+        const slotContentY = wa.y + clippedZoneYInWorkArea + barHeight;
+        // Height available for window content
+        let desiredSlotH = zoneDef.height - yClippage - barHeight;
+        let maxAllowableSlotH = (wa.y + wa.height) - slotContentY;
+        let slotH = Math.min(desiredSlotH, maxAllowableSlotH);
+        slotH = Math.max(slotH, minWindowDim);
 
-        // Final window height is the minimum of desired and allowable, constrained by a minimum practical height.
-        let targetH = Math.min(desiredWindowH, maxAllowableWindowH);
-        targetH = Math.max(targetH, minWindowDim);
+        // --- Apply Gaps ---
+        // Window position and size with gaps
+        const gappedWindowX = slotX + GAP_POS_OFFSET;
+        let gappedWindowW = slotW - GAP_SIZE_REDUCTION;
+        gappedWindowW = Math.max(gappedWindowW, minWindowDim);
 
+        const gappedWindowY = slotContentY + GAP_POS_OFFSET; // Gap between tabBar and window
+        let gappedWindowH = slotH - GAP_SIZE_REDUCTION; // Reduce for top & bottom gap in content area
+        gappedWindowH = Math.max(gappedWindowH, minWindowDim);
 
-        window.move_resize_frame(false, targetX, targetY, targetW, targetH);
+        // TabBar position and size with gaps
+        // TabBar Y: Gap from top of workArea (or clipped zone top)
+        const tabBarX = wa.x + zoneDef.x + GAP_POS_OFFSET;
+        const tabBarY = wa.y + clippedZoneYInWorkArea + GAP_POS_OFFSET;
+        const tabBarW = gappedWindowW; // Tab bar width matches the gapped window width
+        // barHeight is already known
 
-        // Update TabBar width to match the new clamped targetW for the window
+        window.move_resize_frame(false, gappedWindowX, gappedWindowY, gappedWindowW, gappedWindowH);
+
         const tabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
-        // The x for tab bar uses zoneDef.x, which is consistent with targetX.
-        // The y for tab bar is wa.y.
-        // We need to ensure the tab bar's visual width matches the snapped window's width.
-        tabBar.set_size(targetW, barHeight); // Update tab bar width to match clamped window width
+        tabBar.set_position(tabBarX, tabBarY);
+        tabBar.set_size(tabBarW, barHeight); // Use actual barHeight from settings
 
 
         if (!isGrabOpContext) {
@@ -255,45 +261,55 @@ export class WindowManager {
                     const checkWa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
                     const checkBarHeight = this._settingsManager.getTabBarHeight();
 
-                    // --- X and Width Check Calculations ---
-                    const checkTargetX = checkWa.x + zoneDef.x;
-                    let desiredCheckWindowW = zoneDef.width;
-                    let maxAllowableCheckWindowW = (checkWa.x + checkWa.width) - checkTargetX;
-                    let checkTargetW = Math.min(desiredCheckWindowW, maxAllowableCheckWindowW);
-                    checkTargetW = Math.max(checkTargetW, minWindowDim);
-                    
-                    // --- Y and Height Check Calculations ---
+                    // --- Recalculate Original Slot for Check ---
+                    const checkSlotX = checkWa.x + zoneDef.x;
+                    let desiredCheckSlotW = zoneDef.width;
+                    let maxAllowableCheckSlotW = (checkWa.x + checkWa.width) - checkSlotX;
+                    let checkSlotW = Math.min(desiredCheckSlotW, maxAllowableCheckSlotW);
+                    checkSlotW = Math.max(checkSlotW, minWindowDim);
+
                     const check_actualZoneYInWorkArea = zoneDef.y;
                     const check_clippedZoneYInWorkArea = Math.max(0, check_actualZoneYInWorkArea);
                     const check_yClippage = check_clippedZoneYInWorkArea - check_actualZoneYInWorkArea;
-                    const checkTargetY = checkWa.y + check_clippedZoneYInWorkArea + checkBarHeight;
-                    let desiredCheckWindowH = zoneDef.height - check_yClippage - checkBarHeight;
-                    let maxAllowableCheckWindowH = (checkWa.y + checkWa.height) - checkTargetY;
-                    let checkTargetH = Math.min(desiredCheckWindowH, maxAllowableCheckWindowH);
-                    checkTargetH = Math.max(checkTargetH, minWindowDim);
+                    
+                    const checkSlotContentY = checkWa.y + check_clippedZoneYInWorkArea + checkBarHeight;
+                    let desiredCheckSlotH = zoneDef.height - check_yClippage - checkBarHeight;
+                    let maxAllowableCheckSlotH = (checkWa.y + checkWa.height) - checkSlotContentY;
+                    let checkSlotH = Math.min(desiredCheckSlotH, maxAllowableCheckSlotH);
+                    checkSlotH = Math.max(checkSlotH, minWindowDim);
 
-                    if (currentRect.x !== checkTargetX || currentRect.y !== checkTargetY ||
-                        currentRect.width !== checkTargetW || currentRect.height !== checkTargetH) {
+                    // --- Apply Gaps for Check ---
+                    const checkGappedWindowX = checkSlotX + GAP_POS_OFFSET;
+                    let checkGappedWindowW = checkSlotW - GAP_SIZE_REDUCTION;
+                    checkGappedWindowW = Math.max(checkGappedWindowW, minWindowDim);
+
+                    const checkGappedWindowY = checkSlotContentY + GAP_POS_OFFSET;
+                    let checkGappedWindowH = checkSlotH - GAP_SIZE_REDUCTION;
+                    checkGappedWindowH = Math.max(checkGappedWindowH, minWindowDim);
+                    
+                    // TabBar check geometry
+                    const checkTabBarX = checkWa.x + zoneDef.x + GAP_POS_OFFSET;
+                    const checkTabBarY = checkWa.y + check_clippedZoneYInWorkArea + GAP_POS_OFFSET;
+                    const checkTabBarW = checkGappedWindowW;
+
+
+                    if (currentRect.x !== checkGappedWindowX || currentRect.y !== checkGappedWindowY ||
+                        currentRect.width !== checkGappedWindowW || currentRect.height !== checkGappedWindowH) {
                         
-                        log('_snapWindowToZone[DelayedCheck]', `Window "${window.get_title()}" position/size mismatch. ` +
-                            `Current: X=${currentRect.x},Y=${currentRect.y},W=${currentRect.width},H=${currentRect.height}. ` +
-                            `Target: X=${checkTargetX},Y=${checkTargetY},W=${checkTargetW},H=${checkTargetH}. Re-applying.`);
-                        window.move_resize_frame(false, checkTargetX, checkTargetY, checkTargetW, checkTargetH);
+                        log('_snapWindowToZone[DelayedCheck]', `Window "${window.get_title()}" position/size mismatch. Re-applying.`);
+                        window.move_resize_frame(false, checkGappedWindowX, checkGappedWindowY, checkGappedWindowW, checkGappedWindowH);
                         
-                        // Also update tab bar width in delayed check if re-applying
                         const delayedTabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
-                        delayedTabBar.set_size(checkTargetW, checkBarHeight);
-
+                        delayedTabBar.set_position(checkTabBarX, checkTabBarY);
+                        delayedTabBar.set_size(checkTabBarW, checkBarHeight);
                     }
                 }
                 return GLib.SOURCE_REMOVE;
             });
         }
 
-        tabBar.addWindow(window); // This was originally before the delayed check, ensure it's still logical.
-                                  // It's fine here, adds window to existing or new bar.
-        // After adding, ensure the new window (which is likely active) is highlighted in tab bar
-        this._activateWindow(zoneId, window); 
+        tabBar.addWindow(window);
+        this._activateWindow(zoneId, window);
     }
 
     _unsnapWindow(window) {
@@ -310,14 +326,13 @@ export class WindowManager {
         delete window._autoZonerZoneId;
 
         const oldDef = this._settingsManager.getZones()
-                                .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
+                                     .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
         if (oldDef) { // Check if oldDef is found before trying to access its properties
             const tabBar = this._tabBars[oldZoneId]; // Get existing tab bar if any
             if (tabBar) {
                  tabBar.removeWindow(window);
             }
         }
-
 
         this._snappedWindows[oldZoneId] =
             (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
@@ -387,12 +402,10 @@ export class WindowManager {
         const actor = global.get_window_actors().find(a => a.get_meta_window() === window);
         if (actor) {
             // Simple raise, activation will bring to front
-            // Animation can be added here if desired, similar to cycle functions
         }
         
         const now = global.get_current_time();
         window.activate(now); // This should raise it as well
-        // window.raise(); // May not be needed if activate works reliably
 
         this._tabBars[zoneId]?.highlightWindow(window);
     }
