@@ -8,7 +8,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { ZoneDetector } from './ZoneDetector.js';
 import { TabBar }       from './TabBar.js';
 
-const TABBAR_HEIGHT = 24;
+const TABBAR_HEIGHT = 32;
 const log = (p, msg) => console.log(`[AutoZoner.WindowManager.${p}] ${msg}`);
 
 export class WindowManager {
@@ -55,7 +55,6 @@ export class WindowManager {
         if ((op & Meta.GrabOp.MOVING) === 0) return;
         if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
             return;
-
         if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
             window._autoZonerOriginalRect = window.get_frame_rect();
             log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}"`);
@@ -90,12 +89,25 @@ export class WindowManager {
         }
 
         const { x, y, width, height } = window.get_frame_rect();
-        const center   = { x: x + width/2, y: y + height/2 };
-        const mon      = window.get_monitor();
-        const zones    = this._settingsManager.getZones();
+        const center    = { x: x + width/2, y: y + height/2 };
+        const mon       = window.get_monitor();
+        const zones     = this._settingsManager.getZones();
         const targetZone = this._zoneDetector.findTargetZone(zones, center, mon);
 
         if (targetZone) {
+            const zoneId = targetZone.name || JSON.stringify(targetZone);
+
+            // If moving from another zone, remove its tab there first
+            const oldZoneId = window._autoZonerZoneId;
+            if (oldZoneId && oldZoneId !== zoneId) {
+                const oldZoneDef = zones.find(z =>
+                    (z.name || JSON.stringify(z)) === oldZoneId
+                );
+                if (oldZoneDef)
+                    this._getZoneTabBar(oldZoneId, oldZoneDef.monitorIndex, oldZoneDef)
+                        .removeWindow(window);
+            }
+
             if (window.get_maximized())
                 window.unmaximize(Meta.MaximizeFlags.BOTH);
 
@@ -103,12 +115,12 @@ export class WindowManager {
             const newX      = wa.x + targetZone.x;
             const newY      = wa.y + targetZone.y + TABBAR_HEIGHT;
             const newHeight = targetZone.height - TABBAR_HEIGHT;
-            const zoneId    = targetZone.name || JSON.stringify(targetZone);
 
-            // Remove from other zones
-            Object.keys(this._snappedWindows).forEach(zid =>
-                this._snappedWindows[zid] = this._snappedWindows[zid].filter(w => w !== window)
-            );
+            // Remove from any other snapped lists
+            Object.keys(this._snappedWindows).forEach(zid => {
+                this._snappedWindows[zid] =
+                    this._snappedWindows[zid].filter(w => w !== window);
+            });
 
             // Add to this zone
             this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
@@ -124,14 +136,14 @@ export class WindowManager {
                 targetZone.width, newHeight
             );
 
-            // Update tab bar
+            // Update this zone's tab bar
             const tabBar = this._getZoneTabBar(zoneId, mon, targetZone);
             tabBar.addWindow(window);
-            tabBar.highlightWindow(window);
 
             log('_onGrabOpEnd', `Snapped "${window.get_title()}" into zone "${zoneId}"`);
         }
         else if (window._autoZonerIsZoned) {
+            // Leaving all zones: remove tab and restore
             const oldZoneId = window._autoZonerZoneId;
             if (this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
                 const o = window._autoZonerOriginalRect;
@@ -154,6 +166,7 @@ export class WindowManager {
                     .removeWindow(window);
         }
     }
+
 
     cycleWindowsInCurrentZone() {
         const focus = global.display.focus_window;
@@ -231,8 +244,8 @@ export class WindowManager {
         this._tabBars[zoneId]?.highlightWindow(prevWin);
     }
 
+
     _activateWindow(zoneId, window) {
-        // bring to front & focus
         const now = global.get_current_time();
         window.activate(now);
         window.raise();

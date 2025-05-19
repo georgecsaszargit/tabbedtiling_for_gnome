@@ -11,19 +11,20 @@
 .zone-tab-bar {
     background-color: rgba(0, 0, 0, 0.15);
     border-bottom: 1px solid rgba(0, 0, 0, 0.3);
-    height: 24px;
+    height: 32px;
     transition: opacity 200ms ease-out;
-    /* Ensure it’s on top */
     z-index: 999;
 }
 
 .zone-tab-bar > .zone-tab {
-    padding: 2px 8px;
-    margin-right: 5px;        /* 5px gap between tabs */
+    padding: 4px 10px;
+    margin-right: 5px;
     border-radius: 4px 4px 0 0;
     background-color: rgba(50, 50, 50, 0.8);
     color: #ffffff;
-    font-size: 11px;
+    font-size: 13px;
+    min-height: 24px;
+    line-height: 24px;
 }
 
 .zone-tab-bar > .zone-tab:hover {

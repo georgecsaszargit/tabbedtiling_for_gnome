@@ -26,6 +26,12 @@ export class TabBar extends St.BoxLayout {
     }
 
     addWindow(window) {
+        // Prevent duplicate tabs
+        if (this._tabs.some(t => t.window === window)) {
+            this.highlightWindow(window);
+            return;
+        }
+
         const title = window.get_title();
         const tab = new St.Button({
             style_class: 'zone-tab',
@@ -43,6 +49,7 @@ export class TabBar extends St.BoxLayout {
         this.add_child(tab);
         this._tabs.push({ window, actor: tab });
         this.visible = true;
+        this.highlightWindow(window);
     }
 
     removeWindow(window) {
