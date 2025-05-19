@@ -6,7 +6,9 @@ import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { ZoneDetector } from './ZoneDetector.js';
+import { TabBar }       from './TabBar.js';
 
+const TABBAR_HEIGHT = 24;
 const log = (p, msg) => console.log(`[AutoZoner.WindowManager.${p}] ${msg}`);
 
 export class WindowManager {
@@ -16,29 +18,21 @@ export class WindowManager {
         this._zoneDetector      = new ZoneDetector();
         this._signalConnections = [];
 
-        this._snappedWindows    = {};
-        this._cycleIndexByZone  = {};
-
-        log('constructor', 'Initialized.');
+        this._snappedWindows    = {};  // zoneId → [windows]
+        this._cycleIndexByZone  = {};  // zoneId → current index
+        this._tabBars           = {};  // zoneId → TabBar instance
     }
 
     connectSignals() {
         this._disconnectSignals();
-
         if (!this._settingsManager.isZoningEnabled()) {
             log('connectSignals', 'Zoning disabled.');
             return;
         }
-
         this._connect(global.display, 'grab-op-begin',  (d, w, o) => this._onGrabOpBegin(d, w, o));
         this._connect(global.display, 'grab-op-end',    (d, w, o) => this._onGrabOpEnd(d, w, o));
         this._connect(global.display, 'window-created', (d, w)   => this._onWindowCreated(d, w));
-
         log('connectSignals', 'Signals connected.');
-    }
-
-    _onWindowCreated(display, window) {
-        // stub
     }
 
     _connect(gobj, name, cb) {
@@ -48,9 +42,13 @@ export class WindowManager {
 
     _disconnectSignals() {
         this._signalConnections.forEach(({ gobj, id }) => {
-            try { gobj.disconnect(id); } catch (e) { log('_disconnectSignals', `Error: ${e}`); }
+            try { gobj.disconnect(id); } catch {}
         });
         this._signalConnections = [];
+    }
+
+    _onWindowCreated(display, window) {
+        // stub
     }
 
     _onGrabOpBegin(display, window, op) {
@@ -66,10 +64,24 @@ export class WindowManager {
             this._highlightManager.startUpdating();
     }
 
+    _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
+        let bar = this._tabBars[zoneId];
+        if (!bar) {
+            bar = new TabBar(zoneId, (win) => this._activateWindow(zoneId, win));
+            this._tabBars[zoneId] = bar;
+            Main.uiGroup.add_child(bar);
+        }
+        const wa = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+        const x  = wa.x + zoneDef.x;
+        const y  = wa.y;
+        bar.set_position(x, y);
+        bar.set_size(zoneDef.width, TABBAR_HEIGHT);
+        return bar;
+    }
+
     _onGrabOpEnd(display, window, op) {
         if (this._highlightManager)
             this._highlightManager.stopUpdating();
-
         if (!this._settingsManager.isZoningEnabled()) return;
         if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) {
             delete window._autoZonerIsZoned;
@@ -78,42 +90,68 @@ export class WindowManager {
         }
 
         const { x, y, width, height } = window.get_frame_rect();
-        const center = { x: x + width/2, y: y + height/2 };
-        const mon     = window.get_monitor();
-        const zones   = this._settingsManager.getZones();
+        const center   = { x: x + width/2, y: y + height/2 };
+        const mon      = window.get_monitor();
+        const zones    = this._settingsManager.getZones();
         const targetZone = this._zoneDetector.findTargetZone(zones, center, mon);
 
         if (targetZone) {
             if (window.get_maximized())
                 window.unmaximize(Meta.MaximizeFlags.BOTH);
 
-            const wa    = Main.layoutManager.getWorkAreaForMonitor(mon);
-            const newX  = wa.x + targetZone.x;
-            const newY  = wa.y + targetZone.y;
-            const zoneId = targetZone.name || JSON.stringify(targetZone);
+            const wa        = Main.layoutManager.getWorkAreaForMonitor(mon);
+            const newX      = wa.x + targetZone.x;
+            const newY      = wa.y + targetZone.y + TABBAR_HEIGHT;
+            const newHeight = targetZone.height - TABBAR_HEIGHT;
+            const zoneId    = targetZone.name || JSON.stringify(targetZone);
 
-            for (const zid of Object.keys(this._snappedWindows)) {
-                this._snappedWindows[zid] = this._snappedWindows[zid].filter(w => w !== window);
-            }
+            // Remove from other zones
+            Object.keys(this._snappedWindows).forEach(zid =>
+                this._snappedWindows[zid] = this._snappedWindows[zid].filter(w => w !== window)
+            );
 
+            // Add to this zone
             this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
             this._snappedWindows[zoneId].push(window);
-
-            window._autoZonerZoneId       = zoneId;
             this._cycleIndexByZone[zoneId] = 0;
-
-            window.move_resize_frame(false, newX, newY, targetZone.width, targetZone.height);
             window._autoZonerIsZoned = true;
+            window._autoZonerZoneId  = zoneId;
+
+            // Resize & move below tab bar
+            window.move_resize_frame(
+                false,
+                newX, newY,
+                targetZone.width, newHeight
+            );
+
+            // Update tab bar
+            const tabBar = this._getZoneTabBar(zoneId, mon, targetZone);
+            tabBar.addWindow(window);
+            tabBar.highlightWindow(window);
+
             log('_onGrabOpEnd', `Snapped "${window.get_title()}" into zone "${zoneId}"`);
-        } else if (window._autoZonerIsZoned) {
+        }
+        else if (window._autoZonerIsZoned) {
+            const oldZoneId = window._autoZonerZoneId;
             if (this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
                 const o = window._autoZonerOriginalRect;
                 window.move_resize_frame(false, o.x, o.y, o.width, o.height);
                 delete window._autoZonerOriginalRect;
                 log('_onGrabOpEnd', `Restored "${window.get_title()}"`);
             }
+
             delete window._autoZonerIsZoned;
             delete window._autoZonerZoneId;
+
+            this._snappedWindows[oldZoneId] =
+                (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
+
+            const oldZoneDef = zones.find(z =>
+                (z.name || JSON.stringify(z)) === oldZoneId
+            );
+            if (oldZoneDef)
+                this._getZoneTabBar(oldZoneId, oldZoneDef.monitorIndex, oldZoneDef)
+                    .removeWindow(window);
         }
     }
 
@@ -140,9 +178,8 @@ export class WindowManager {
         const actor = global.get_window_actors()
             .find(a => a.get_meta_window() === nextWin);
         if (actor) {
-            const mon     = nextWin.get_monitor();
-            const wa      = Main.layoutManager.getWorkAreaForMonitor(mon);
-            const finalY  = actor.get_y();
+            const wa     = Main.layoutManager.getWorkAreaForMonitor(nextWin.get_monitor());
+            const finalY = actor.get_y();
             actor.set_y(wa.y + wa.height + 10);
             actor.ease({
                 y:        finalY,
@@ -150,7 +187,10 @@ export class WindowManager {
                 mode:     Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
+
         nextWin.activate(global.get_current_time());
+        nextWin.raise();
+        this._tabBars[zoneId]?.highlightWindow(nextWin);
     }
 
     cycleWindowsInCurrentZoneBackward() {
@@ -176,9 +216,8 @@ export class WindowManager {
         const actor = global.get_window_actors()
             .find(a => a.get_meta_window() === prevWin);
         if (actor) {
-            const mon     = prevWin.get_monitor();
-            const wa      = Main.layoutManager.getWorkAreaForMonitor(mon);
-            const finalY  = actor.get_y();
+            const wa     = Main.layoutManager.getWorkAreaForMonitor(prevWin.get_monitor());
+            const finalY = actor.get_y();
             actor.set_y(wa.y - actor.get_height() - 10);
             actor.ease({
                 y:        finalY,
@@ -186,7 +225,18 @@ export class WindowManager {
                 mode:     Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
+
         prevWin.activate(global.get_current_time());
+        prevWin.raise();
+        this._tabBars[zoneId]?.highlightWindow(prevWin);
+    }
+
+    _activateWindow(zoneId, window) {
+        // bring to front & focus
+        const now = global.get_current_time();
+        window.activate(now);
+        window.raise();
+        this._tabBars[zoneId]?.highlightWindow(window);
     }
 
     cleanupWindowProperties() {
@@ -202,6 +252,7 @@ export class WindowManager {
 
     destroy() {
         this._disconnectSignals();
+        Object.values(this._tabBars).forEach(bar => bar.destroy());
         log('destroy', 'Destroyed.');
     }
 }

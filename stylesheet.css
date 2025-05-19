@@ -5,3 +5,34 @@
     border-radius: 6px;
     /* transition: opacity 100ms ease-out, all 50ms ease-out; */ /* Optional: for smoother transitions */
 }
+
+/* stylesheet.css */
+
+.zone-tab-bar {
+    background-color: rgba(0, 0, 0, 0.15);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+    height: 24px;
+    transition: opacity 200ms ease-out;
+    /* Ensure it’s on top */
+    z-index: 999;
+}
+
+.zone-tab-bar > .zone-tab {
+    padding: 2px 8px;
+    margin-right: 5px;        /* 5px gap between tabs */
+    border-radius: 4px 4px 0 0;
+    background-color: rgba(50, 50, 50, 0.8);
+    color: #ffffff;
+    font-size: 11px;
+}
+
+.zone-tab-bar > .zone-tab:hover {
+    background-color: rgba(78, 154, 249, 0.6);
+    cursor: pointer;
+}
+
+.zone-tab.active {
+    background-color: rgba(78, 154, 249, 0.8);
+    color: #000000;
+}
+
