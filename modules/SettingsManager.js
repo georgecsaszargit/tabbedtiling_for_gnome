@@ -3,19 +3,22 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
-const ZONE_SETTINGS_KEY                  = 'zones';
-const ENABLE_ZONING_KEY                  = 'enable-auto-zoning';
-const RESTORE_ON_UNTILE_KEY              = 'restore-original-size-on-untile';
-const TILE_NEW_WINDOWS_KEY               = 'tile-new-windows';
-const HIGHLIGHT_ON_HOVER_KEY             = 'highlight-on-hover';
-const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
-const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
+const ZONE_SETTINGS_KEY                     = 'zones';
+const ENABLE_ZONING_KEY                     = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY                 = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY                  = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY                = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator';
 
 // New tab bar settings keys
-const TAB_BAR_HEIGHT_KEY                 = 'tab-bar-height';
-const TAB_FONT_SIZE_KEY                  = 'tab-font-size';
+const TAB_BAR_HEIGHT_KEY                    = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                     = 'tab-font-size';
 
-const DEFAULT_ZONES_FILENAME             = 'default_zones.json';
+// New zone gap setting key
+const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size'; // ADDED
+
+const DEFAULT_ZONES_FILENAME                = 'default_zones.json';
 
 const log = (msg) => console.log(`[AutoZoner.SettingsManager] ${msg}`);
 
@@ -34,6 +37,7 @@ export class SettingsManager {
         this._connectSettingChange(CYCLE_BACKWARD_ACCELERATOR_KEY, () => log('Backward cycle accelerator changed'));
         this._connectSettingChange(TAB_BAR_HEIGHT_KEY, () => log('Tab bar height changed'));
         this._connectSettingChange(TAB_FONT_SIZE_KEY, () => log('Tab font size changed'));
+        this._connectSettingChange(ZONE_GAP_SIZE_KEY, () => log('Zone gap size changed')); // ADDED listener log
     }
 
     _loadDefaultZonesFromFileIfNeeded() {
@@ -124,6 +128,11 @@ export class SettingsManager {
         return this._gsettings.get_int(TAB_FONT_SIZE_KEY);
     }
 
+    // ADDED: Getter for zone gap size
+    getZoneGapSize() {
+        return this._gsettings.get_int(ZONE_GAP_SIZE_KEY);
+    }
+
     destroy() {
         for (const [gobj, ids] of this._signalHandlers) {
             ids.forEach(id => {
@@ -134,4 +143,3 @@ export class SettingsManager {
         log('Destroyed.');
     }
 }
-

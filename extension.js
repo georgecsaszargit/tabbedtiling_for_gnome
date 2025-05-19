@@ -1,18 +1,19 @@
 // extension.js
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
-import * as Main    from 'resource:///org/gnome/shell/ui/main.js';
-import Meta         from 'gi://Meta';
-import Shell        from 'gi://Shell';
+import * as Main     from 'resource:///org/gnome/shell/ui/main.js';
+import Meta          from 'gi://Meta';
+import Shell         from 'gi://Shell';
 
 import { SettingsManager }  from './modules/SettingsManager.js';
 import { HighlightManager } from './modules/HighlightManager.js';
 import { WindowManager }    from './modules/WindowManager.js';
 import { Indicator }        from './modules/Indicator.js';
 
-const ENABLE_ZONING_KEY               = 'enable-auto-zoning';
-const CYCLE_ACCELERATOR_KEY           = 'cycle-zone-windows-accelerator';
-const CYCLE_BACKWARD_ACCELERATOR_KEY  = 'cycle-zone-windows-backward-accelerator';
+const ENABLE_ZONING_KEY                  = 'enable-auto-zoning';
+const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
+const ZONE_GAP_SIZE_KEY                  = 'zone-gap-size'; // ADDED KEY
 const log = msg => console.log(`[AutoZoner.Main] ${msg}`);
 
 export default class AutoZonerExtension extends Extension {
@@ -26,6 +27,7 @@ export default class AutoZonerExtension extends Extension {
         this._zoningChangedId             = 0;
         this._cycleAccelChangedId         = 0;
         this._cycleBackwardAccelChangedId = 0;
+        this._zoneGapChangedId            = 0; // ADDED property
     }
 
     enable() {
@@ -33,27 +35,33 @@ export default class AutoZonerExtension extends Extension {
 
         this._settingsManager  = new SettingsManager(this.getSettings(), this.path);
         this._highlightManager = new HighlightManager(this._settingsManager);
-        this._windowManager    = new WindowManager(this._settingsManager, this._highlightManager);
+        this._windowManager    = new WindowManager(this._settingsManager, this._highlightManager); // Pass settingsManager
         this._indicator        = new Indicator(this.uuid, this._settingsManager, this);
 
-        // Connect our drag & keybinding signals
         this._windowManager.connectSignals();
-
-        // Immediately snap any existing windows into zones
         this._windowManager.snapAllWindowsToZones();
 
-        // Watch for turning zoning on/off
         this._zoningChangedId = this._settingsManager.getGSettingObject().connect(
             `changed::${ENABLE_ZONING_KEY}`,
             () => {
-                this._windowManager.connectSignals();
+                this._windowManager.connectSignals(); // Reconnect/disconnect based on new state
                 if (this._settingsManager.isZoningEnabled())
                     this._windowManager.snapAllWindowsToZones();
                 this._indicator.updateToggleState();
             }
         );
 
-        // Handle monitor changes (resize, add/remove)
+        // ADDED: Listener for zone gap size changes
+        this._zoneGapChangedId = this._settingsManager.getGSettingObject().connect(
+            `changed::${ZONE_GAP_SIZE_KEY}`,
+            () => {
+                log('Zone gap size setting changed; re-snapping windows...');
+                if (this._settingsManager.isZoningEnabled()) {
+                    this._windowManager.snapAllWindowsToZones();
+                }
+            }
+        );
+
         if (Main.layoutManager) {
             this._monitorsChangedId = Main.layoutManager.connect(
                 'monitors-changed',
@@ -61,11 +69,9 @@ export default class AutoZonerExtension extends Extension {
             );
         }
 
-        // Keyboard shortcuts
         this._addCycleKeybinding();
         this._addCycleBackwardKeybinding();
 
-        // Watch for rebind requests
         this._cycleAccelChangedId = this._settingsManager.getGSettingObject().connect(
             `changed::${CYCLE_ACCELERATOR_KEY}`,
             () => {
@@ -104,6 +110,11 @@ export default class AutoZonerExtension extends Extension {
         if (this._cycleBackwardAccelChangedId) {
             this._settingsManager.getGSettingObject().disconnect(this._cycleBackwardAccelChangedId);
             this._cycleBackwardAccelChangedId = 0;
+        }
+        // ADDED: Disconnect zone gap listener
+        if (this._zoneGapChangedId) {
+            this._settingsManager.getGSettingObject().disconnect(this._zoneGapChangedId);
+            this._zoneGapChangedId = 0;
         }
 
         Main.wm.removeKeybinding(CYCLE_ACCELERATOR_KEY);
@@ -150,4 +161,3 @@ export default class AutoZonerExtension extends Extension {
         );
     }
 }
-

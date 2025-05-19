@@ -7,17 +7,18 @@ import GObject from 'gi://GObject';
 import Gdk from 'gi://Gdk';
 
 import { ExtensionPreferences, gettext as _ } from
-       'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+        'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-const ZONE_SETTINGS_KEY                  = 'zones';
-const ENABLE_ZONING_KEY                  = 'enable-auto-zoning';
-const RESTORE_ON_UNTILE_KEY              = 'restore-original-size-on-untile';
-const TILE_NEW_WINDOWS_KEY               = 'tile-new-windows';
-const HIGHLIGHT_ON_HOVER_KEY             = 'highlight-on-hover';
-const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
-const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
-const TAB_BAR_HEIGHT_KEY                 = 'tab-bar-height';
-const TAB_FONT_SIZE_KEY                  = 'tab-font-size';
+const ZONE_SETTINGS_KEY                     = 'zones';
+const ENABLE_ZONING_KEY                     = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY                 = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY                  = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY                = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator';
+const TAB_BAR_HEIGHT_KEY                    = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                     = 'tab-font-size';
+const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size'; // ADDED
 
 const log = msg => console.log(`[AutoZonerPrefs] ${msg}`);
 
@@ -169,7 +170,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         const accelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Shortcut'),
-            subtitle: _('Type the accelerator string (e.g. <Control><Alt>8) then press Enter'),
+            subtitle: _('Type accelerator (e.g. <Control><Alt>8) then Enter'),
             activatable_widget: accelEntry
         });
         accelRow.add_suffix(accelEntry);
@@ -191,12 +192,12 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         const backwardAccelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Backward Shortcut'),
-            subtitle: _('Type the accelerator string (e.g. <Control><Alt>9) then press Enter'),
+            subtitle: _('Type accelerator (e.g. <Control><Alt>9) then Enter'),
             activatable_widget: backwardAccelEntry
         });
         backwardAccelRow.add_suffix(backwardAccelEntry);
         generalGroup.add(backwardAccelRow);
-
+        
         // Tab Bar Height
         const heightSpin = Gtk.SpinButton.new_with_range(16, 200, 1);
         heightSpin.set_value(this._settings.get_int(TAB_BAR_HEIGHT_KEY));
@@ -204,7 +205,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
             this._settings.set_int(TAB_BAR_HEIGHT_KEY, heightSpin.get_value_as_int());
         });
         const heightRow = new Adw.ActionRow({
-            title: _('Tab Bar Height'),
+            title: _('Tab Bar Height (px)'),
             subtitle: _('Height in pixels for the tab bar'),
             activatable_widget: heightSpin
         });
@@ -218,12 +219,27 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
             this._settings.set_int(TAB_FONT_SIZE_KEY, fontSpin.get_value_as_int());
         });
         const fontRow = new Adw.ActionRow({
-            title: _('Tab Font Size'),
+            title: _('Tab Font Size (px)'),
             subtitle: _('Font size in pixels for the tab labels'),
             activatable_widget: fontSpin
         });
         fontRow.add_suffix(fontSpin);
         generalGroup.add(fontRow);
+
+        // Zone Gap Size (ADDED)
+        const gapSpin = Gtk.SpinButton.new_with_range(0, 50, 1); // Min 0, Max 50, Step 1
+        gapSpin.set_value(this._settings.get_int(ZONE_GAP_SIZE_KEY));
+        gapSpin.connect('value-changed', () => {
+            this._settings.set_int(ZONE_GAP_SIZE_KEY, gapSpin.get_value_as_int());
+        });
+        const gapRow = new Adw.ActionRow({
+            title: _('Zone Gap Size (px)'),
+            subtitle: _('Gap around zones. 0 for no gaps. Re-snap windows to apply.'),
+            activatable_widget: gapSpin
+        });
+        gapRow.add_suffix(gapSpin);
+        generalGroup.add(gapRow);
+
 
         // Zone Definitions Group
         this._zonesGroup = new Adw.PreferencesGroup({
@@ -232,10 +248,8 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         page.add(this._zonesGroup);
 
-        // Populate existing zones
         this._loadZonesToUI(monitorCount);
 
-        // “Add New Zone” button
         this._addButtonRow = new Adw.ActionRow();
         const addButton = new Gtk.Button({
             label: _('Add New Zone'),
@@ -347,4 +361,3 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         log(`Saved ${zones.length} zones.`);
     }
 }
-

@@ -54,6 +54,11 @@
       <summary>Tab Font Size</summary>
       <description>Font size in pixels for the tab labels.</description>
     </key>
+
+    <key name="zone-gap-size" type="i">
+      <default>5</default>
+      <summary>Zone Gap Size</summary>
+      <description>Pixel size of the gap around and between window zones. Set to 0 to disable gaps. Changes may require a re-snap of windows.</description>
+    </key>
   </schema>
 </schemalist>
-
