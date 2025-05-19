@@ -36,15 +36,24 @@ export default class AutoZonerExtension extends Extension {
         this._windowManager    = new WindowManager(this._settingsManager, this._highlightManager);
         this._indicator        = new Indicator(this.uuid, this._settingsManager, this);
 
+        // Connect our drag & keybinding signals
         this._windowManager.connectSignals();
+
+        // Immediately snap any existing windows into zones
+        this._windowManager.snapAllWindowsToZones();
+
+        // Watch for turning zoning on/off
         this._zoningChangedId = this._settingsManager.getGSettingObject().connect(
             `changed::${ENABLE_ZONING_KEY}`,
             () => {
                 this._windowManager.connectSignals();
+                if (this._settingsManager.isZoningEnabled())
+                    this._windowManager.snapAllWindowsToZones();
                 this._indicator.updateToggleState();
             }
         );
 
+        // Handle monitor changes (resize, add/remove)
         if (Main.layoutManager) {
             this._monitorsChangedId = Main.layoutManager.connect(
                 'monitors-changed',
@@ -52,9 +61,11 @@ export default class AutoZonerExtension extends Extension {
             );
         }
 
+        // Keyboard shortcuts
         this._addCycleKeybinding();
         this._addCycleBackwardKeybinding();
 
+        // Watch for rebind requests
         this._cycleAccelChangedId = this._settingsManager.getGSettingObject().connect(
             `changed::${CYCLE_ACCELERATOR_KEY}`,
             () => {

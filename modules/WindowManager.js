@@ -17,7 +17,7 @@ export class WindowManager {
         this._zoneDetector      = new ZoneDetector();
         this._signalConnections = [];
 
-        this._snappedWindows    = {};  // zoneId → [windows]
+        this._snappedWindows    = {};  // zoneId → [Meta.Window]
         this._cycleIndexByZone  = {};  // zoneId → current index
         this._tabBars           = {};  // zoneId → TabBar instance
     }
@@ -98,78 +98,102 @@ export class WindowManager {
         const targetZone = this._zoneDetector.findTargetZone(zones, center, mon);
 
         if (targetZone) {
-            const zoneId = targetZone.name || JSON.stringify(targetZone);
-
-            // If moving from another zone, remove its tab there first
-            const oldZoneId = window._autoZonerZoneId;
-            if (oldZoneId && oldZoneId !== zoneId) {
-                const oldZoneDef = zones.find(z =>
-                    (z.name || JSON.stringify(z)) === oldZoneId
-                );
-                if (oldZoneDef)
-                    this._getZoneTabBar(oldZoneId, oldZoneDef.monitorIndex, oldZoneDef)
-                        .removeWindow(window);
-            }
-
-            if (window.get_maximized())
-                window.unmaximize(Meta.MaximizeFlags.BOTH);
-
-            const wa           = Main.layoutManager.getWorkAreaForMonitor(mon);
-            const barHeight    = this._settingsManager.getTabBarHeight();
-            const newX         = wa.x + targetZone.x;
-            const newY         = wa.y + targetZone.y + barHeight;
-            const newHeight    = targetZone.height - barHeight;
-
-            // Remove from any other snapped lists
-            Object.keys(this._snappedWindows).forEach(zid => {
-                this._snappedWindows[zid] =
-                    this._snappedWindows[zid].filter(w => w !== window);
-            });
-
-            // Add to this zone
-            this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
-            this._snappedWindows[zoneId].push(window);
-            this._cycleIndexByZone[zoneId] = 0;
-            window._autoZonerIsZoned = true;
-            window._autoZonerZoneId  = zoneId;
-
-            // Resize & move below tab bar
-            window.move_resize_frame(
-                false,
-                newX, newY,
-                targetZone.width, newHeight
-            );
-
-            // Update this zone's tab bar
-            const tabBar = this._getZoneTabBar(zoneId, mon, targetZone);
-            tabBar.addWindow(window);
-
-            log('_onGrabOpEnd', `Snapped "${window.get_title()}" into zone "${zoneId}"`);
+            this._snapWindowToZone(window, targetZone);
+            log('_onGrabOpEnd', `Snapped "${window.get_title()}" into zone "${targetZone.name || JSON.stringify(targetZone)}"`);
         }
         else if (window._autoZonerIsZoned) {
-            // Leaving all zones: remove tab and restore
-            const oldZoneId = window._autoZonerZoneId;
-            if (this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
-                const o = window._autoZonerOriginalRect;
-                window.move_resize_frame(false, o.x, o.y, o.width, o.height);
-                delete window._autoZonerOriginalRect;
-                log('_onGrabOpEnd', `Restored "${window.get_title()}"`);
-            }
-
-            delete window._autoZonerIsZoned;
-            delete window._autoZonerZoneId;
-
-            this._snappedWindows[oldZoneId] =
-                (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
-
-            const oldZoneDef = zones.find(z =>
-                (z.name || JSON.stringify(z)) === oldZoneId
-            );
-            if (oldZoneDef)
-                this._getZoneTabBar(oldZoneId, oldZoneDef.monitorIndex, oldZoneDef)
-                    .removeWindow(window);
+            this._unsnapWindow(window);
         }
     }
+
+    /**
+     * Snap all existing on-screen windows into their nearest zones.
+     */
+    snapAllWindowsToZones() {
+        if (!this._settingsManager.isZoningEnabled()) return;
+        const zones = this._settingsManager.getZones();
+
+        global.get_window_actors().forEach(actor => {
+            const win = actor.get_meta_window();
+            if (!win || win.is_fullscreen() || win.get_window_type() !== Meta.WindowType.NORMAL)
+                return;
+
+            const { x, y, width, height } = win.get_frame_rect();
+            const center = { x: x + width/2, y: y + height/2 };
+            const mon    = win.get_monitor();
+            const targetZone = this._zoneDetector.findTargetZone(zones, center, mon);
+            if (targetZone)
+                this._snapWindowToZone(win, targetZone);
+        });
+    }
+
+    /**
+     * Helper to snap a single window into a specific zone.
+     */
+    _snapWindowToZone(window, zoneDef) {
+        const zoneId = zoneDef.name || JSON.stringify(zoneDef);
+
+        // Remove from any other snapped lists
+        Object.keys(this._snappedWindows).forEach(zid => {
+            this._snappedWindows[zid] = (this._snappedWindows[zid] || []).filter(w => w !== window);
+        });
+
+        // Undo maximize if needed
+        if (window.get_maximized())
+            window.unmaximize(Meta.MaximizeFlags.BOTH);
+
+        // Record original if not stored
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
+            window._autoZonerOriginalRect = window.get_frame_rect();
+        }
+
+        // Add to this zone
+        this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
+        this._snappedWindows[zoneId].push(window);
+        this._cycleIndexByZone[zoneId] = 0;
+        window._autoZonerIsZoned = true;
+        window._autoZonerZoneId  = zoneId;
+
+        // Compute and move below the tab bar
+        const wa        = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
+        const barHeight = this._settingsManager.getTabBarHeight();
+        const newX      = wa.x + zoneDef.x;
+        const newY      = wa.y + zoneDef.y + barHeight;
+        const newH      = zoneDef.height - barHeight;
+        window.move_resize_frame(false, newX, newY, zoneDef.width, newH);
+
+        // Update the tab bar
+        const tabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
+        tabBar.addWindow(window);
+    }
+
+    /**
+     * Helper to remove a window from its zone (when moved out).
+     */
+    _unsnapWindow(window) {
+        const oldZoneId = window._autoZonerZoneId;
+        if (!oldZoneId) return;
+
+        // Restore original if needed
+        if (this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
+            const o = window._autoZonerOriginalRect;
+            window.move_resize_frame(false, o.x, o.y, o.width, o.height);
+            delete window._autoZonerOriginalRect;
+        }
+
+        delete window._autoZonerIsZoned;
+        delete window._autoZonerZoneId;
+
+        this._snappedWindows[oldZoneId] = (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
+
+        const zones = this._settingsManager.getZones();
+        const oldZoneDef = zones.find(z => (z.name || JSON.stringify(z)) === oldZoneId);
+        if (oldZoneDef) {
+            this._getZoneTabBar(oldZoneId, oldZoneDef.monitorIndex, oldZoneDef).removeWindow(window);
+        }
+    }
+
+
 
     cycleWindowsInCurrentZone() {
         const focus = global.display.focus_window;
