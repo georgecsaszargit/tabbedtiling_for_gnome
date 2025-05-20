@@ -1,11 +1,14 @@
+// modules/HighlightManager.js
+
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
+import Mtk from 'gi://Mtk'; // Added for Mtk.Rectangle
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { ZoneHighlighter } from './ZoneHighlighter.js';
 import { ZoneDetector } from './ZoneDetector.js';
 
-const HIGHLIGHT_TIMER_INTERVAL = 30; // Reduced interval for more responsiveness
+const HIGHLIGHT_TIMER_INTERVAL = 30;
 const log = (msg) => console.log(`[AutoZoner.HighlightManager] ${msg}`);
 
 export class HighlightManager {
@@ -14,7 +17,7 @@ export class HighlightManager {
         this._zoneDetector = new ZoneDetector();
         this._zoneHighlighters = new Map();
         this._highlightTimerId = 0;
-        this._currentlyHighlightedInfo = null; // { monitorIndex, zone, highlighter }
+        this._currentlyHighlightedInfo = null;
 
         this._initZoneHighlighters();
         log("Initialized.");
@@ -43,7 +46,6 @@ export class HighlightManager {
     }
 
     _updateHighlightOnDrag() {
-        // If timer is stopped externally (e.g., drag ends), this ensures it doesn't run.
         if (this._highlightTimerId === 0) return GLib.SOURCE_REMOVE;
 
         if (!this._settingsManager.isHighlightOnHoverEnabled()) {
@@ -51,13 +53,14 @@ export class HighlightManager {
                 this._currentlyHighlightedInfo.highlighter.requestHide();
                 this._currentlyHighlightedInfo = null;
             }
-            return GLib.SOURCE_REMOVE; // Stop timer if highlighting is globally disabled
+            return GLib.SOURCE_REMOVE;
         }
 
         const [pointerX, pointerY] = global.get_pointer();
-        const pointerMonitorIndex = global.display.get_monitor_index_for_rect(new Meta.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 }));
+        // Changed Meta.Rectangle to Mtk.Rectangle
+        const pointerMonitorIndex = global.display.get_monitor_index_for_rect(new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 }));
 
-        if (pointerMonitorIndex === -1) { // Pointer not on any monitor
+        if (pointerMonitorIndex === -1) {
             if (this._currentlyHighlightedInfo) {
                 this._currentlyHighlightedInfo.highlighter.requestHide();
                 this._currentlyHighlightedInfo = null;
@@ -70,14 +73,10 @@ export class HighlightManager {
         const currentHighlighterOnPointerMonitor = this._zoneHighlighters.get(pointerMonitorIndex);
 
         if (hoveredZone) {
-            // Is this a new zone or a different monitor than what's currently highlighted?
             if (!this._currentlyHighlightedInfo ||
                 this._currentlyHighlightedInfo.monitorIndex !== pointerMonitorIndex ||
-                this._currentlyHighlightedInfo.zone.name !== hoveredZone.name || // Compare by a unique zone identifier if available
-                this._currentlyHighlightedInfo.zone.x !== hoveredZone.x ||       // Or by all relevant properties
-                this._currentlyHighlightedInfo.zone.y !== hoveredZone.y) {
+                (this._currentlyHighlightedInfo.zone.name || JSON.stringify(this._currentlyHighlightedInfo.zone)) !== (hoveredZone.name || JSON.stringify(hoveredZone))) { // Compare zones more robustly
 
-                // Hide previous highlighter if it exists and is on a different monitor or is a different zone
                 if (this._currentlyHighlightedInfo && this._currentlyHighlightedInfo.highlighter) {
                     this._currentlyHighlightedInfo.highlighter.requestHide();
                 }
@@ -91,18 +90,15 @@ export class HighlightManager {
                     currentHighlighterOnPointerMonitor.showAt(absoluteZoneRect);
                     this._currentlyHighlightedInfo = {
                         monitorIndex: pointerMonitorIndex,
-                        zone: hoveredZone,
+                        zone: hoveredZone, // Store the actual zone object
                         highlighter: currentHighlighterOnPointerMonitor
                     };
                 } else {
-                     this._currentlyHighlightedInfo = null; // No highlighter for this monitor
+                     this._currentlyHighlightedInfo = null;
                 }
             }
-            // If it's the same zone and monitor, do nothing, the highlighter is already shown.
-        } else { // Not hovering any zone on the current monitor
+        } else {
             if (this._currentlyHighlightedInfo) {
-                // Only hide if the current highlight was on the same monitor the pointer is now on,
-                // or if the pointer moved off all monitors entirely (handled by pointerMonitorIndex === -1 case)
                 if (this._currentlyHighlightedInfo.monitorIndex === pointerMonitorIndex) {
                     this._currentlyHighlightedInfo.highlighter.requestHide();
                     this._currentlyHighlightedInfo = null;
@@ -114,16 +110,16 @@ export class HighlightManager {
 
     startUpdating() {
         if (this._settingsManager.isHighlightOnHoverEnabled()) {
-            if (this._highlightTimerId > 0) GLib.Source.remove(this._highlightTimerId); // Clear previous
+            if (this._highlightTimerId > 0) GLib.Source.remove(this._highlightTimerId);
             this._highlightTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, HIGHLIGHT_TIMER_INTERVAL, this._updateHighlightOnDrag.bind(this));
             log("Started highlight updates.");
         } else {
             log("Highlighting disabled, not starting updates.");
-            if (this._highlightTimerId > 0) { // Ensure timer is stopped if setting is off
+            if (this._highlightTimerId > 0) {
                 GLib.Source.remove(this._highlightTimerId);
                 this._highlightTimerId = 0;
             }
-             this._hideAllActiveHighlighters(); // Ensure all are hidden if setting is off
+             this._hideAllActiveHighlighters();
         }
     }
 
@@ -133,22 +129,21 @@ export class HighlightManager {
             this._highlightTimerId = 0;
         }
         this._hideAllActiveHighlighters();
-        this._currentlyHighlightedInfo = null;
+        this._currentlyHighlightedInfo = null; // Clear this on stop
         log("Stopped highlight updates.");
     }
 
-    _hideAllActiveHighlighters() { // Renamed to avoid conflict with ZoneHighlighter's own hide
+    _hideAllActiveHighlighters() {
         this._zoneHighlighters.forEach(highlighter => {
-            if (highlighter.isShowingIntent || highlighter.visible) { // Check intent or actual visibility
+            if (highlighter.isShowingIntent || highlighter.visible) {
                 highlighter.requestHide();
             }
         });
     }
 
     reinitHighlighters() {
-        this.stopUpdating(); // Stop current operations
+        this.stopUpdating();
         this._initZoneHighlighters();
-        // No need to restart updating here, it will be started on next grab-op-begin if enabled
     }
 
     destroy() {
