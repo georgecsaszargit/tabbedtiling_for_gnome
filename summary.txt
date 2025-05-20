@@ -1,0 +1,1911 @@
+===== FILE: ./schemas/gschemas.compiled =====
+[BINARY FILE]
+
+
+
+===== FILE: ./schemas/org.gnome.shell.extensions.autozoner.gschema.xml =====
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="gnome-shell-extensions">
+  <schema path="/org/gnome/shell/extensions/autozoner/" id="org.gnome.shell.extensions.autozoner">
+    <key name="enable-auto-zoning" type="b">
+      <default>true</default>
+      <summary>Enable Auto Zoning</summary>
+      <description>Automatically tile windows when moved into a defined zone.</description>
+    </key>
+
+    <key name="zones" type="s">
+      <default>'[]'</default>
+      <summary>Zone Definitions</summary>
+      <description>A JSON string representing an array of zone objects.</description>
+    </key>
+
+    <key name="restore-original-size-on-untile" type="b">
+      <default>true</default>
+      <summary>Restore Original Size</summary>
+      <description>When a window leaves all zones, restore its previous size/position.</description>
+    </key>
+
+    <key name="tile-new-windows" type="b">
+      <default>true</default>
+      <summary>Tile New Windows</summary>
+      <description>Automatically tile newly opened windows if they fall into a zone.</description>
+    </key>
+
+    <key name="highlight-on-hover" type="b">
+      <default>true</default>
+      <summary>Highlight Zone on Hover</summary>
+      <description>Visually highlight a zone when dragging a window over it.</description>
+    </key>
+
+    <key name="cycle-zone-windows-accelerator" type="as">
+      <default>['&lt;Control&gt;&lt;Alt&gt;8']</default>
+      <summary>Cycle Windows Forward</summary>
+      <description>Keyboard shortcut to loop focus forward through windows in the active zone.</description>
+    </key>
+
+    <key name="cycle-zone-windows-backward-accelerator" type="as">
+      <default>['&lt;Control&gt;&lt;Alt&gt;9']</default>
+      <summary>Cycle Windows Backward</summary>
+      <description>Keyboard shortcut to loop focus backward through windows in the active zone.</description>
+    </key>
+
+    <key name="tab-bar-height" type="i">
+      <default>32</default>
+      <summary>Tab Bar Height</summary>
+      <description>Height in pixels of the tab bar.</description>
+    </key>
+
+    <key name="tab-font-size" type="i">
+      <default>13</default>
+      <summary>Tab Font Size</summary>
+      <description>Font size in pixels for the tab labels.</description>
+    </key>
+
+    <key name="zone-gap-size" type="i">
+      <default>5</default>
+      <summary>Zone Gap Size</summary>
+      <description>Pixel size of the gap around and between window zones. Set to 0 to disable gaps. Changes may require a re-snap of windows.</description>
+    </key>
+  </schema>
+</schemalist>
+
+
+
+===== FILE: ./metadata.json =====
+{
+  "name": "Auto Zoner",
+  "description": "Automatically tiles windows into predefined screen zones.",
+  "uuid": "autozoner@georgecs.com",
+  "shell-version": ["45", "46", "47", "48"],
+  "version": 1,
+  "gettext-domain": "autozoner",
+  "settings-schema": "org.gnome.shell.extensions.autozoner",
+  "url": "https://github.com/your-username/autozoner"
+}
+
+
+
+===== FILE: ./extension.js =====
+// extension.js
+
+import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Main     from 'resource:///org/gnome/shell/ui/main.js';
+import Meta          from 'gi://Meta';
+import Shell         from 'gi://Shell';
+
+import { SettingsManager }  from './modules/SettingsManager.js';
+import { HighlightManager } from './modules/HighlightManager.js';
+import { WindowManager }    from './modules/WindowManager.js';
+import { Indicator }        from './modules/Indicator.js';
+
+const ENABLE_ZONING_KEY                  = 'enable-auto-zoning';
+const CYCLE_ACCELERATOR_KEY              = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY     = 'cycle-zone-windows-backward-accelerator';
+const ZONE_GAP_SIZE_KEY                  = 'zone-gap-size'; // ADDED KEY
+const log = msg => console.log(`[AutoZoner.Main] ${msg}`);
+
+export default class AutoZonerExtension extends Extension {
+    constructor(metadata) {
+        super(metadata);
+        this._settingsManager             = null;
+        this._highlightManager            = null;
+        this._windowManager               = null;
+        this._indicator                   = null;
+        this._monitorsChangedId           = 0;
+        this._zoningChangedId             = 0;
+        this._cycleAccelChangedId         = 0;
+        this._cycleBackwardAccelChangedId = 0;
+        this._zoneGapChangedId            = 0; // ADDED property
+    }
+
+    enable() {
+        log('Enabling…');
+
+        this._settingsManager  = new SettingsManager(this.getSettings(), this.path);
+        this._highlightManager = new HighlightManager(this._settingsManager);
+        this._windowManager    = new WindowManager(this._settingsManager, this._highlightManager); // Pass settingsManager
+        this._indicator        = new Indicator(this.uuid, this._settingsManager, this);
+
+        this._windowManager.connectSignals();
+        this._windowManager.snapAllWindowsToZones();
+
+        this._zoningChangedId = this._settingsManager.getGSettingObject().connect(
+            `changed::${ENABLE_ZONING_KEY}`,
+            () => {
+                this._windowManager.connectSignals(); // Reconnect/disconnect based on new state
+                if (this._settingsManager.isZoningEnabled())
+                    this._windowManager.snapAllWindowsToZones();
+                this._indicator.updateToggleState();
+            }
+        );
+
+        // ADDED: Listener for zone gap size changes
+        this._zoneGapChangedId = this._settingsManager.getGSettingObject().connect(
+            `changed::${ZONE_GAP_SIZE_KEY}`,
+            () => {
+                log('Zone gap size setting changed; re-snapping windows...');
+                if (this._settingsManager.isZoningEnabled()) {
+                    this._windowManager.snapAllWindowsToZones();
+                }
+            }
+        );
+
+        if (Main.layoutManager) {
+            this._monitorsChangedId = Main.layoutManager.connect(
+                'monitors-changed',
+                () => this._highlightManager.reinitHighlighters()
+            );
+        }
+
+        this._addCycleKeybinding();
+        this._addCycleBackwardKeybinding();
+
+        this._cycleAccelChangedId = this._settingsManager.getGSettingObject().connect(
+            `changed::${CYCLE_ACCELERATOR_KEY}`,
+            () => {
+                log('Cycle accelerator changed; rebinding…');
+                Main.wm.removeKeybinding(CYCLE_ACCELERATOR_KEY);
+                this._addCycleKeybinding();
+            }
+        );
+        this._cycleBackwardAccelChangedId = this._settingsManager.getGSettingObject().connect(
+            `changed::${CYCLE_BACKWARD_ACCELERATOR_KEY}`,
+            () => {
+                log('Backward cycle accelerator changed; rebinding…');
+                Main.wm.removeKeybinding(CYCLE_BACKWARD_ACCELERATOR_KEY);
+                this._addCycleBackwardKeybinding();
+            }
+        );
+
+        log('Enabled.');
+    }
+
+    disable() {
+        log('Disabling…');
+
+        if (this._monitorsChangedId && Main.layoutManager) {
+            Main.layoutManager.disconnect(this._monitorsChangedId);
+            this._monitorsChangedId = 0;
+        }
+        if (this._zoningChangedId) {
+            this._settingsManager.getGSettingObject().disconnect(this._zoningChangedId);
+            this._zoningChangedId = 0;
+        }
+        if (this._cycleAccelChangedId) {
+            this._settingsManager.getGSettingObject().disconnect(this._cycleAccelChangedId);
+            this._cycleAccelChangedId = 0;
+        }
+        if (this._cycleBackwardAccelChangedId) {
+            this._settingsManager.getGSettingObject().disconnect(this._cycleBackwardAccelChangedId);
+            this._cycleBackwardAccelChangedId = 0;
+        }
+        // ADDED: Disconnect zone gap listener
+        if (this._zoneGapChangedId) {
+            this._settingsManager.getGSettingObject().disconnect(this._zoneGapChangedId);
+            this._zoneGapChangedId = 0;
+        }
+
+        Main.wm.removeKeybinding(CYCLE_ACCELERATOR_KEY);
+        Main.wm.removeKeybinding(CYCLE_BACKWARD_ACCELERATOR_KEY);
+
+        this._windowManager.cleanupWindowProperties();
+        this._windowManager.destroy();
+        this._highlightManager.destroy();
+        this._indicator.destroy();
+        this._settingsManager.destroy();
+
+        log('Disabled.');
+    }
+
+    _addCycleKeybinding() {
+        const accel = this._settingsManager.getGSettingObject().get_strv(CYCLE_ACCELERATOR_KEY)[0];
+        log(`Binding cycle shortcut: ${accel}`);
+
+        Main.wm.addKeybinding(
+            CYCLE_ACCELERATOR_KEY,
+            this._settingsManager.getGSettingObject(),
+            Meta.KeyBindingFlags.NONE,
+            Shell.ActionMode.ALL,
+            () => {
+                log('🏷️ Cycle shortcut pressed!');
+                this._windowManager.cycleWindowsInCurrentZone();
+            }
+        );
+    }
+
+    _addCycleBackwardKeybinding() {
+        const accel = this._settingsManager.getGSettingObject().get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY)[0];
+        log(`Binding backward cycle shortcut: ${accel}`);
+
+        Main.wm.addKeybinding(
+            CYCLE_BACKWARD_ACCELERATOR_KEY,
+            this._settingsManager.getGSettingObject(),
+            Meta.KeyBindingFlags.NONE,
+            Shell.ActionMode.ALL,
+            () => {
+                log('🏷️ Backward cycle shortcut pressed!');
+                this._windowManager.cycleWindowsInCurrentZoneBackward();
+            }
+        );
+    }
+}
+
+
+
+===== FILE: ./modules/WindowManager.js =====
+// modules/WindowManager.js
+
+import Meta from 'gi://Meta';
+import GLib from 'gi://GLib';
+import Clutter from 'gi://Clutter';
+import Mtk from 'gi://Mtk'; // For Mtk.Rectangle
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+import { ZoneDetector } from './ZoneDetector.js';
+import { TabBar }       from './TabBar.js';
+
+const log = (context, msg) => console.log(`[AutoZoner.WindowManager.${context}] ${msg}`);
+
+const ALL_RESIZING_OPS = Meta.GrabOp.RESIZING_N | Meta.GrabOp.RESIZING_S |
+                         Meta.GrabOp.RESIZING_E | Meta.GrabOp.RESIZING_W |
+                         Meta.GrabOp.RESIZING_NW | Meta.GrabOp.RESIZING_NE |
+                         Meta.GrabOp.RESIZING_SW | Meta.GrabOp.RESIZING_SE |
+                         Meta.GrabOp.KEYBOARD_RESIZING_N | Meta.GrabOp.KEYBOARD_RESIZING_S |
+                         Meta.GrabOp.KEYBOARD_RESIZING_E | Meta.GrabOp.KEYBOARD_RESIZING_W |
+                         Meta.GrabOp.KEYBOARD_RESIZING_NW | Meta.GrabOp.KEYBOARD_RESIZING_NE |
+                         Meta.GrabOp.KEYBOARD_RESIZING_SW | Meta.GrabOp.KEYBOARD_RESIZING_SE;
+
+export class WindowManager {
+    constructor(settingsManager, highlightManager) {
+        this._settingsManager  = settingsManager;
+        this._highlightManager = highlightManager;
+        this._zoneDetector     = new ZoneDetector();
+        this._signalConnections = [];
+
+        this._snappedWindows    = {};
+        this._cycleIndexByZone  = {};
+        this._tabBars           = {};
+    }
+
+    connectSignals() {
+        this._disconnectSignals();
+        if (!this._settingsManager.isZoningEnabled()) {
+            log('connectSignals', 'Zoning disabled.');
+            return;
+        }
+        this._connect(global.display, 'grab-op-begin',  (d, w, o) => this._onGrabOpBegin(d, w, o));
+        this._connect(global.display, 'grab-op-end',    (d, w, o) => this._onGrabOpEnd(d, w, o));
+        this._connect(global.display, 'window-created', (d, w)    => this._onWindowCreated(d, w));
+        log('connectSignals', 'Signals connected.');
+    }
+
+    _connect(gobj, name, cb) {
+        const id = gobj.connect(name, cb);
+        this._signalConnections.push({ gobj, id });
+    }
+
+    _disconnectSignals() {
+        this._signalConnections.forEach(({ gobj, id }) => {
+            try { gobj.disconnect(id); } catch {}
+        });
+        this._signalConnections = [];
+    }
+
+    _onWindowCreated(display, window) {
+        if (!this._settingsManager.isZoningEnabled() ||
+            !this._settingsManager.isTileNewWindowsEnabled())
+            return;
+        if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
+            return;
+        // For window created, it's possible it's not fully formed yet.
+        // A short delay might be better before checking its state.
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { // Increased delay slightly
+            // Check if window is still valid (not null) before accessing properties
+            if (!window || typeof window.get_frame_rect !== 'function') return GLib.SOURCE_REMOVE;
+
+            const rect   = window.get_frame_rect();
+            const center = { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
+            const mon    = window.get_monitor();
+            const zones  = this._settingsManager.getZones();
+            const zoneDef = this._zoneDetector.findTargetZone(zones, center, mon);
+            if (zoneDef) {
+                this._snapWindowToZone(window, zoneDef, false);
+                log('_onWindowCreated', `Auto-snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`);
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _onGrabOpBegin(display, window, op) {
+        const isMouseMoving = (op & Meta.GrabOp.MOVING) !== 0;
+        const isKeyboardMoving = (op & Meta.GrabOp.KEYBOARD_MOVING) !== 0;
+
+        if (!(isMouseMoving || isKeyboardMoving)) {
+            log('_onGrabOpBegin', `Operation is not a move (op: ${op}), stopping highlights and skipping further setup.`);
+            this._highlightManager?.stopUpdating();
+            return;
+        }
+
+        if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
+            return;
+
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
+            window._autoZonerOriginalRect = window.get_frame_rect();
+            log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}" during move.`);
+        }
+        this._highlightManager?.startUpdating();
+    }
+
+    _onGrabOpEnd(display, window, op) {
+        this._highlightManager?.stopUpdating();
+
+        if (op === Meta.GrabOp.MOVING || op === Meta.GrabOp.KEYBOARD_MOVING) {
+            log('_onGrabOpEnd', `Operation is MOVING or KEYBOARD_MOVING (op: ${op}), proceeding to snap logic.`);
+        } else if ((op & ALL_RESIZING_OPS) !== 0) {
+            log('_onGrabOpEnd', `Operation is RESIZING (op: ${op}) and not a direct move type, skipping snap.`);
+            return;
+        } else {
+            log('_onGrabOpEnd', `Operation is UNKNOWN or not a snappable type (op: ${op}), skipping snap.`);
+            return;
+        }
+
+        if (!this._settingsManager.isZoningEnabled()) return;
+
+        if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) {
+            this._unsnapWindow(window);
+            return;
+        }
+
+        const [pointerX, pointerY] = global.get_pointer();
+        const hitRect = new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 });
+        let mon = global.display.get_monitor_index_for_rect(hitRect);
+        if (mon < 0)
+            mon = window.get_monitor();
+        if (mon < 0 || mon >= Main.layoutManager.monitors.length) {
+            mon = Main.layoutManager.primaryIndex;
+        }
+
+        const center = { x: pointerX, y: pointerY };
+        const zones  = this._settingsManager.getZones();
+        const zoneDef = this._zoneDetector.findTargetZone(zones, center, mon);
+
+        if (zoneDef) {
+            this._snapWindowToZone(window, zoneDef, true);
+            log('_onGrabOpEnd', `Snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`);
+        } else {
+            this._unsnapWindow(window);
+        }
+    }
+
+    _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
+        let bar = this._tabBars[zoneId];
+        if (!bar) {
+            bar = new TabBar(zoneId, win => this._activateWindow(zoneId, win), this._settingsManager);
+            this._tabBars[zoneId] = bar;
+            Main.uiGroup.add_child(bar);
+        }
+        const wa       = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+        const x        = wa.x + zoneDef.x;
+        const y        = wa.y + Math.max(0, zoneDef.y);
+        const height   = this._settingsManager.getTabBarHeight();
+        bar.set_position(x, y);
+        bar.set_size(zoneDef.width, height);
+        bar.set_style(`height: ${height}px;`);
+
+        return bar;
+    }
+
+    snapAllWindowsToZones() {
+        if (!this._settingsManager.isZoningEnabled()) return;
+        const zones = this._settingsManager.getZones();
+
+        global.get_window_actors().forEach(actor => {
+            const win = actor.get_meta_window();
+            if (!win || win.is_fullscreen() || win.get_window_type() !== Meta.WindowType.NORMAL)
+                return;
+
+            const rect   = win.get_frame_rect();
+            const center = { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
+            const mon    = win.get_monitor();
+            
+            let currentMonitorIndex = mon;
+            if (currentMonitorIndex < 0 || currentMonitorIndex >= Main.layoutManager.monitors.length) {
+                 currentMonitorIndex = Main.layoutManager.primaryIndex;
+            }
+
+            let zoneDef = this._zoneDetector.findTargetZone(zones, center, currentMonitorIndex);
+            if (!zoneDef) {
+                const wa = Main.layoutManager.getWorkAreaForMonitor(currentMonitorIndex);
+                let best, bestDist = Infinity;
+                zones.filter(z => z.monitorIndex === currentMonitorIndex).forEach(z => {
+                    const zx = wa.x + z.x + z.width/2;
+                    const zy = wa.y + z.y + z.height/2;
+                    const dx = zx - center.x, dy = zy - center.y;
+                    const d2 = dx*dx + dy*dy;
+                    if (d2 < bestDist) { bestDist = d2; best = z; }
+                });
+                zoneDef = best;
+            }
+
+            if (zoneDef)
+                this._snapWindowToZone(win, zoneDef, false);
+        });
+    }
+
+    _snapWindowToZone(window, zoneDef, isGrabOpContext = false) {
+        const zoneId = zoneDef.name || JSON.stringify(zoneDef);
+
+        const oldZoneId = window._autoZonerZoneId;
+        if (oldZoneId && oldZoneId !== zoneId) {
+            const oldDef = this._settingsManager.getZones()
+                                         .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
+            if (oldDef) {
+                this._getZoneTabBar(oldZoneId, oldDef.monitorIndex, oldDef)
+                    .removeWindow(window);
+                this._snappedWindows[oldZoneId] =
+                    (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
+            }
+        }
+
+        if (window.get_maximized && window.get_maximized())
+            window.unmaximize(Meta.MaximizeFlags.BOTH);
+
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect)
+            window._autoZonerOriginalRect = window.get_frame_rect();
+
+        this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
+        if (!this._snappedWindows[zoneId].includes(window))
+            this._snappedWindows[zoneId].push(window);
+        
+        this._cycleIndexByZone[zoneId] = (this._snappedWindows[zoneId].length - 1);
+        window._autoZonerIsZoned = true;
+        window._autoZonerZoneId  = zoneId;
+
+        const wa             = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
+        const barHeight      = this._settingsManager.getTabBarHeight();
+        const minWindowDim   = 50;
+        const zoneGap = this._settingsManager.getZoneGapSize();
+        let gapPosOffset = 0;
+        let gapSizeReduction = 0;
+
+        if (zoneGap > 0) {
+            gapPosOffset = Math.floor(zoneGap / 2);
+            gapSizeReduction = zoneGap;
+        }
+
+        const slotX = wa.x + zoneDef.x;
+        let desiredSlotW = zoneDef.width;
+        let maxAllowableSlotW = (wa.x + wa.width) - slotX;
+        let slotW = Math.min(desiredSlotW, maxAllowableSlotW);
+        slotW = Math.max(slotW, minWindowDim);
+
+        const actualZoneYInWorkArea = zoneDef.y;
+        const clippedZoneYInWorkArea = Math.max(0, actualZoneYInWorkArea);
+        const yClippage = clippedZoneYInWorkArea - actualZoneYInWorkArea;
+
+        const slotContentY = wa.y + clippedZoneYInWorkArea + barHeight;
+        let desiredSlotH = zoneDef.height - yClippage - barHeight;
+        let maxAllowableSlotH = (wa.y + wa.height) - slotContentY;
+        let slotH = Math.min(desiredSlotH, maxAllowableSlotH);
+        slotH = Math.max(slotH, minWindowDim);
+
+        const gappedWindowX = slotX + gapPosOffset;
+        let gappedWindowW = slotW - gapSizeReduction;
+        gappedWindowW = Math.max(gappedWindowW, minWindowDim);
+
+        const gappedWindowY = slotContentY + gapPosOffset;
+        let gappedWindowH = slotH - gapSizeReduction;
+        gappedWindowH = Math.max(gappedWindowH, minWindowDim);
+        
+        const tabBarX = wa.x + zoneDef.x + gapPosOffset;
+        const tabBarY = wa.y + clippedZoneYInWorkArea + gapPosOffset;
+        const tabBarW = gappedWindowW;
+
+        window.move_resize_frame(false, gappedWindowX, gappedWindowY, gappedWindowW, gappedWindowH);
+
+        const tabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
+        tabBar.set_position(tabBarX, tabBarY);
+        tabBar.set_size(tabBarW, barHeight);
+
+        if (!isGrabOpContext) {
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
+                // Check if window and its properties are still accessible and relevant
+                if (window && typeof window.get_frame_rect === 'function' && // Basic check for GObject validity
+                    window._autoZonerZoneId === zoneId &&
+                    window.get_maximized() === Meta.MaximizeFlags.NONE && 
+                    !window.is_fullscreen()) {
+                    
+                    const currentRect = window.get_frame_rect();
+                    const checkWa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
+                    const checkBarHeight = this._settingsManager.getTabBarHeight();
+                    const checkZoneGap = this._settingsManager.getZoneGapSize();
+                    let chkGapPosOffset = 0;
+                    let chkGapSizeReduction = 0;
+                    if (checkZoneGap > 0) {
+                        chkGapPosOffset = Math.floor(checkZoneGap / 2);
+                        chkGapSizeReduction = checkZoneGap;
+                    }
+
+                    const chkSlotX = checkWa.x + zoneDef.x;
+                    let chkDesiredSlotW = zoneDef.width;
+                    let chkMaxAllowableSlotW = (checkWa.x + checkWa.width) - chkSlotX;
+                    let chkSlotW = Math.min(chkDesiredSlotW, chkMaxAllowableSlotW);
+                    chkSlotW = Math.max(chkSlotW, minWindowDim);
+
+                    const chk_actualZoneYInWorkArea = zoneDef.y;
+                    const chk_clippedZoneYInWorkArea = Math.max(0, chk_actualZoneYInWorkArea);
+                    const chk_yClippage = chk_clippedZoneYInWorkArea - chk_actualZoneYInWorkArea;
+                    const chkSlotContentY = checkWa.y + chk_clippedZoneYInWorkArea + checkBarHeight;
+                    let chkDesiredSlotH = zoneDef.height - chk_yClippage - checkBarHeight;
+                    let chkMaxAllowableSlotH = (checkWa.y + checkWa.height) - chkSlotContentY;
+                    let chkSlotH = Math.min(chkDesiredSlotH, chkMaxAllowableSlotH);
+                    chkSlotH = Math.max(chkSlotH, minWindowDim);
+
+                    const chkGappedWindowX = chkSlotX + chkGapPosOffset;
+                    let chkGappedWindowW = chkSlotW - chkGapSizeReduction;
+                    chkGappedWindowW = Math.max(chkGappedWindowW, minWindowDim);
+                    const chkGappedWindowY = chkSlotContentY + chkGapPosOffset;
+                    let chkGappedWindowH = chkSlotH - chkGapSizeReduction;
+                    chkGappedWindowH = Math.max(chkGappedWindowH, minWindowDim);
+                    
+                    const chkTabBarX = checkWa.x + zoneDef.x + chkGapPosOffset;
+                    const chkTabBarY = checkWa.y + chk_clippedZoneYInWorkArea + chkGapPosOffset;
+                    const chkTabBarW = chkGappedWindowW;
+
+                    if (currentRect.x !== chkGappedWindowX || currentRect.y !== chkGappedWindowY ||
+                        currentRect.width !== chkGappedWindowW || currentRect.height !== chkGappedWindowH) {
+                        
+                        log('_snapWindowToZone[DelayedCheck]', `Window "${window.get_title()}" position/size mismatch. Re-applying.`);
+                        window.move_resize_frame(false, chkGappedWindowX, chkGappedWindowY, chkGappedWindowW, chkGappedWindowH);
+                        
+                        const delayedTabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
+                        delayedTabBar.set_position(chkTabBarX, chkTabBarY);
+                        delayedTabBar.set_size(chkTabBarW, checkBarHeight);
+                    }
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+
+        tabBar.addWindow(window);
+        this._activateWindow(zoneId, window);
+    }
+
+    _unsnapWindow(window) {
+        const oldZoneId = window._autoZonerZoneId;
+        if (!oldZoneId) return;
+
+        log('_unsnapWindow', `Unsnapping "${window.get_title()}" from zone "${oldZoneId}"`);
+
+        if (this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
+            const o = window._autoZonerOriginalRect;
+            window.move_resize_frame(false, o.x, o.y, o.width, o.height);
+            delete window._autoZonerOriginalRect;
+        }
+
+        delete window._autoZonerIsZoned;
+        delete window._autoZonerZoneId;
+
+        const oldDef = this._settingsManager.getZones()
+                                     .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
+        if (oldDef) {
+            const tabBar = this._tabBars[oldZoneId];
+            if (tabBar) {
+                 tabBar.removeWindow(window);
+            }
+        }
+
+        this._snappedWindows[oldZoneId] =
+            (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
+
+        if (this._snappedWindows[oldZoneId] && this._snappedWindows[oldZoneId].length === 0) {
+            if (this._tabBars[oldZoneId]) {
+                this._tabBars[oldZoneId].destroy();
+                delete this._tabBars[oldZoneId];
+            }
+            delete this._cycleIndexByZone[oldZoneId];
+        }
+    }
+
+    cycleWindowsInCurrentZone() {
+        const focus = global.display.focus_window;
+        if (!focus || !focus._autoZonerZoneId) {
+            log('cycle', 'No zoned window focused; aborting.');
+            return;
+        }
+
+        const zoneId = focus._autoZonerZoneId;
+        const list   = this._snappedWindows[zoneId] || [];
+        if (list.length < 2) {
+            log('cycle', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`);
+            return;
+        }
+
+        let idx = (this._cycleIndexByZone[zoneId] + 1) % list.length;
+        this._cycleIndexByZone[zoneId] = idx;
+        const nextWin = list[idx];
+
+        log('cycle', `Cycling to [${idx}] "${nextWin.get_title()}" in zone "${zoneId}".`);
+        this._activateWindow(zoneId, nextWin);
+    }
+
+    cycleWindowsInCurrentZoneBackward() {
+        const focus = global.display.focus_window;
+        if (!focus || !focus._autoZonerZoneId) {
+            log('cycle-backward', 'No zoned window focused; aborting.');
+            return;
+        }
+
+        const zoneId = focus._autoZonerZoneId;
+        const list   = this._snappedWindows[zoneId] || [];
+        if (list.length < 2) {
+            log('cycle-backward', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`);
+            return;
+        }
+
+        let idx = (this._cycleIndexByZone[zoneId] - 1 + list.length) % list.length;
+        this._cycleIndexByZone[zoneId] = idx;
+        const prevWin = list[idx];
+
+        log('cycle-backward', `Cycling backward to [${idx}] "${prevWin.get_title()}" in zone "${zoneId}".`);
+        this._activateWindow(zoneId, prevWin);
+    }
+
+    _activateWindow(zoneId, window) {
+        const list = this._snappedWindows[zoneId] || [];
+        const currentWindowIndex = list.indexOf(window);
+        if (currentWindowIndex !== -1) {
+            this._cycleIndexByZone[zoneId] = currentWindowIndex;
+        }
+        
+        const now = global.get_current_time();
+        window.activate(now);
+
+        this._tabBars[zoneId]?.highlightWindow(window);
+    }
+
+    cleanupWindowProperties() {
+        global.get_window_actors().forEach(actor => {
+            const w = actor.get_meta_window();
+            if (w) {
+                delete w._autoZonerIsZoned;
+                delete w._autoZonerOriginalRect;
+                delete w._autoZonerZoneId;
+            }
+        });
+    }
+
+    destroy() {
+        this._disconnectSignals();
+        Object.values(this._tabBars).forEach(bar => bar.destroy());
+        this._tabBars = {};
+        this.cleanupWindowProperties();
+        log('destroy', 'Destroyed.');
+    }
+}
+
+
+
+===== FILE: ./modules/ZoneDetector.js =====
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+const log = (prefix, msg) => console.log(`[AutoZoner.ZoneDetector.${prefix}] ${msg}`);
+
+function isPointInsideRect(point, rect) {
+    const check = point.x >= rect.x && point.x <= rect.x + rect.width &&
+                  point.y >= rect.y && point.y <= rect.y + rect.height;
+    // log('isPointInsideRect', `Point: ${JSON.stringify(point)}, Rect: ${JSON.stringify(rect)}, Result: ${check}`);
+    return check;
+}
+
+function getMonitorWorkArea(monitorIndex) {
+    if (monitorIndex < 0 || monitorIndex >= Main.layoutManager.monitors.length) {
+        const primaryIndex = Main.layoutManager.primaryIndex;
+        // log('getMonitorWorkArea', `Invalid index ${monitorIndex}, using primary ${primaryIndex}`);
+        return Main.layoutManager.getWorkAreaForMonitor(primaryIndex);
+    }
+    // log('getMonitorWorkArea', `Using index ${monitorIndex}`);
+    return Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+}
+
+export class ZoneDetector {
+    constructor() {
+        // log('constructor', 'Initialized');
+    }
+
+    findTargetZone(zones, point, monitorIndex) {
+        const workArea = getMonitorWorkArea(monitorIndex);
+        log('findTargetZone', `Searching on monitor ${monitorIndex} (WorkArea: X:${workArea.x} Y:${workArea.y} W:${workArea.width} H:${workArea.height}) for point X:${point.x} Y:${point.y}`);
+        log('findTargetZone', `Available zones for this search: ${JSON.stringify(zones.filter(z => z.monitorIndex === monitorIndex))}`);
+
+        for (const zone of zones) {
+            if (zone.monitorIndex === monitorIndex) {
+                const absoluteZoneRect = {
+                    x: workArea.x + zone.x,
+                    y: workArea.y + zone.y,
+                    width: zone.width,
+                    height: zone.height
+                };
+                log('findTargetZone', `Checking zone "${zone.name || 'Unnamed'}": AbsRect: X:${absoluteZoneRect.x} Y:${absoluteZoneRect.y} W:${absoluteZoneRect.width} H:${absoluteZoneRect.height}`);
+                if (isPointInsideRect(point, absoluteZoneRect)) {
+                    log('findTargetZone', `Point IS INSIDE zone "${zone.name || 'Unnamed'}"`);
+                    return zone;
+                } else {
+                    // log('findTargetZone', `Point is NOT inside zone "${zone.name || 'Unnamed'}"`);
+                }
+            }
+        }
+        log('findTargetZone', `No target zone found for point X:${point.x} Y:${point.y} on monitor ${monitorIndex}`);
+        return null;
+    }
+}
+
+
+
+===== FILE: ./modules/TabBar.js =====
+// modules/TabBar.js
+
+import St from 'gi://St';
+import GObject from 'gi://GObject';
+import Clutter from 'gi://Clutter';
+import Shell from 'gi://Shell'; // Needed for Shell.AppSystem and Shell.WindowTracker
+
+const tbLog = (zoneId, msg) => {
+    let zId = typeof zoneId === 'string' && zoneId.startsWith('{') ? 'JSON_Zone' : zoneId;
+    console.log(`[AutoZoner.TabBar (${zId})] ${msg}`);
+};
+
+export class TabBar extends St.BoxLayout {
+    static {
+        GObject.registerClass(this);
+    }
+
+    constructor(zoneId, onTabClicked, settingsManager) {
+        super({
+            style_class: 'zone-tab-bar',
+            vertical: false,
+            x_expand: true,
+            y_expand: false,
+            reactive: true,
+        });
+        this._zoneId          = zoneId;
+        this._onTabClicked    = onTabClicked;
+        this._settingsManager = settingsManager;
+        this._tabs            = [];
+        this.visible          = false;
+        this.opacity          = 255;
+        // Get WindowTracker once
+        this._windowTracker = Shell.WindowTracker.get_default();
+    }
+
+    addWindow(window) {
+        if (this._tabs.some(t => t.window === window)) {
+            this.highlightWindow(window);
+            return;
+        }
+
+        const app = this._windowTracker.get_window_app(window);
+
+        let labelText;
+        if (app) {
+            labelText = app.get_name() || window.get_title() || 'Untitled Window';
+        } else {
+            const wmClass = window.get_wm_class();
+            if (wmClass) {
+                labelText = wmClass
+                    .replace(/[-_.]+/g, ' ')
+                    .split(' ')
+                    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                    .join(' ') || window.get_title() || 'Untitled Window';
+            } else {
+                labelText = window.get_title() || 'Untitled Window';
+            }
+        }
+
+        const tabButton = new St.Button({
+            style_class: 'zone-tab',
+            reactive: true,
+        });
+
+        const tabContentBox = new St.BoxLayout({
+            vertical: false,
+        });
+        tabButton.set_child(tabContentBox);
+
+        let appIconActor = null;
+        if (app) {
+            const gicon = app.get_icon();
+            if (gicon) {
+                appIconActor = new St.Icon({
+                    gicon: gicon,
+                    icon_size: 16,
+                    style_class: 'zone-tab-app-icon'
+                });
+                tabContentBox.add_child(appIconActor);
+            }
+        }
+
+        const fontSize = this._settingsManager.getTabFontSize();
+        const titleLabel = new St.Label({
+            text: labelText,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        let titleStyle = `font-size: ${fontSize}px;`;
+        if (appIconActor) {
+            titleStyle += ' margin-left: 5px;';
+        }
+        titleLabel.set_style(titleStyle);
+        tabContentBox.add_child(titleLabel);
+
+        const onTabPress = () => {
+            this._onTabClicked(window);
+            return Clutter.EVENT_STOP;
+        };
+        tabButton.connect('button-press-event', onTabPress);
+
+        const unmanagingSignalId = window.connect('unmanaging', (metaWindow) => {
+            tbLog(this._zoneId, `Window "${metaWindow.get_title() || labelText}" is unmanaging. Removing tab.`);
+            this._onWindowUnmanaging(metaWindow);
+        });
+
+        this.add_child(tabButton);
+        this._tabs.push({ window, actor: tabButton, unmanagingSignalId, labelText });
+        this.visible = true;
+        this.highlightWindow(window);
+        tbLog(this._zoneId, `Added tab for "${labelText}". Total tabs: ${this._tabs.length}`);
+    }
+
+    _onWindowUnmanaging(unmanagingWindow) {
+        const idx = this._tabs.findIndex(t => t.window === unmanagingWindow);
+        if (idx >= 0) {
+            const { actor, labelText } = this._tabs[idx];
+            // Note: unmanagingSignalId is automatically disconnected when 'actor' (the St.Button) is destroyed,
+            // if 'window' was the source of the signal and actor was its direct handler.
+            // However, since 'window' is the source and 'this._onWindowUnmanaging' is the callback,
+            // the signal connection is on 'window' itself. It should be explicitly disconnected if 'window' isn't destroyed with the actor.
+            // But 'unmanaging' means the window *is* going away, so further access might be risky.
+            // The signal is on `window` object, `disconnect` was correct.
+            // The `unmanagingSignalId` is already disconnected automatically by GObject when `unmanagingWindow` is finalized.
+            // Explicitly removing it before actor destruction is good practice if there's any doubt.
+            // However, the main issue is accessing a potentially invalid 'unmanagingWindow' object.
+            // At this point, 'unmanagingWindow' is emitting 'unmanaging', so it's still valid for this callback.
+            this.remove_child(actor);
+            actor.destroy();
+            this._tabs.splice(idx, 1);
+            tbLog(this._zoneId, `Tab for unmanaged window "${labelText}" removed. Remaining tabs: ${this._tabs.length}`);
+            if (this._tabs.length === 0) {
+                this.visible = false;
+                tbLog(this._zoneId, "Became empty, hiding TabBar.");
+            }
+        } else {
+            tbLog(this._zoneId, `Window "${unmanagingWindow.get_title()}" was unmanaged but not found in tabs list.`);
+        }
+    }
+
+    removeWindow(window) {
+        const idx = this._tabs.findIndex(t => t.window === window);
+        if (idx >= 0) {
+            const { actor, unmanagingSignalId, labelText } = this._tabs[idx];
+            if (unmanagingSignalId && window) { // Check if window is not null
+                try {
+                    window.disconnect(unmanagingSignalId);
+                } catch (e) {
+                    tbLog(this._zoneId, `Error disconnecting window unmanaging signal for "${labelText}" during removeWindow: ${e.message}`);
+                }
+            }
+            this.remove_child(actor);
+            actor.destroy();
+            this._tabs.splice(idx, 1);
+            tbLog(this._zoneId, `Explicitly removed tab for "${labelText}". Remaining tabs: ${this._tabs.length}`);
+        }
+        if (this._tabs.length === 0) {
+            this.visible = false;
+            tbLog(this._zoneId, "Became empty after removeWindow, hiding TabBar.");
+        }
+    }
+
+    highlightWindow(window) {
+        this._tabs.forEach(({ window: w, actor }) => {
+            if (w === window)
+                actor.add_style_class_name('active');
+            else
+                actor.remove_style_class_name('active');
+        });
+    }
+
+    destroy() {
+        tbLog(this._zoneId, "Destroying TabBar...");
+        this._tabs.forEach(({ window, actor, unmanagingSignalId, labelText }) => {
+            if (window && unmanagingSignalId) { // Check if window is not null
+                try {
+                    window.disconnect(unmanagingSignalId);
+                } catch (e) {
+                    // tbLog(this._zoneId, `Error disconnecting window unmanaging signal for "${labelText}" during TabBar destroy: ${e.message}`);
+                }
+            }
+            actor.destroy();
+        });
+        this._tabs = [];
+
+        if (this.get_parent()) {
+            this.get_parent().remove_child(this);
+        }
+        super.destroy();
+        tbLog(this._zoneId, "TabBar destroyed fully.");
+    }
+}
+
+
+
+===== FILE: ./modules/SettingsManager.js =====
+// modules/SettingsManager.js
+
+import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
+
+const ZONE_SETTINGS_KEY                     = 'zones';
+const ENABLE_ZONING_KEY                     = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY                 = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY                  = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY                = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator';
+
+// New tab bar settings keys
+const TAB_BAR_HEIGHT_KEY                    = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                     = 'tab-font-size';
+
+// New zone gap setting key
+const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size'; // ADDED
+
+const DEFAULT_ZONES_FILENAME                = 'default_zones.json';
+
+const log = (msg) => console.log(`[AutoZoner.SettingsManager] ${msg}`);
+
+export class SettingsManager {
+    constructor(gsettings, extensionPath) {
+        this._gsettings       = gsettings;
+        this._extensionPath   = extensionPath;
+        this._zones           = [];
+        this._signalHandlers  = new Map();
+
+        this._loadDefaultZonesFromFileIfNeeded();
+        this._loadZonesFromGSettings();
+
+        this._connectSettingChange(ZONE_SETTINGS_KEY, () => this._loadZonesFromGSettings());
+        this._connectSettingChange(CYCLE_ACCELERATOR_KEY, () => log('Cycle accelerator changed'));
+        this._connectSettingChange(CYCLE_BACKWARD_ACCELERATOR_KEY, () => log('Backward cycle accelerator changed'));
+        this._connectSettingChange(TAB_BAR_HEIGHT_KEY, () => log('Tab bar height changed'));
+        this._connectSettingChange(TAB_FONT_SIZE_KEY, () => log('Tab font size changed'));
+        this._connectSettingChange(ZONE_GAP_SIZE_KEY, () => log('Zone gap size changed')); // ADDED listener log
+    }
+
+    _loadDefaultZonesFromFileIfNeeded() {
+        log(`Attempting to load zones from ${DEFAULT_ZONES_FILENAME}…`);
+        const file = Gio.File.new_for_path(GLib.build_filenamev([this._extensionPath, DEFAULT_ZONES_FILENAME]));
+        try {
+            if (file.query_exists(null)) {
+                const [ok, contents] = file.load_contents(null);
+                if (ok) {
+                    const json = new TextDecoder().decode(contents).trim();
+                    if (json.startsWith('[') && json.endsWith(']')) {
+                        const current = this._gsettings.get_string(ZONE_SETTINGS_KEY);
+                        if (current !== json) {
+                            this._gsettings.set_string(ZONE_SETTINGS_KEY, json);
+                            log(`Default zones imported from file.`);
+                        }
+                    } else {
+                        log(`Default file does not contain a JSON array.`);
+                    }
+                } else {
+                    log(`Could not read ${DEFAULT_ZONES_FILENAME}.`);
+                }
+            }
+        } catch (e) {
+            log(`Error loading default zones: ${e}`);
+        }
+    }
+
+    _loadZonesFromGSettings() {
+        try {
+            const str = this._gsettings.get_string(ZONE_SETTINGS_KEY);
+            const arr = JSON.parse(str);
+            this._zones = Array.isArray(arr) ? arr : [];
+            log(`Loaded ${this._zones.length} zones.`);
+        } catch (e) {
+            log(`Failed to parse zones JSON: ${e}`);
+            this._zones = [];
+        }
+    }
+
+    _connectSettingChange(key, callback) {
+        const id = this._gsettings.connect(`changed::${key}`, callback);
+        if (!this._signalHandlers.has(this._gsettings))
+            this._signalHandlers.set(this._gsettings, []);
+        this._signalHandlers.get(this._gsettings).push(id);
+    }
+
+    getGSettingObject() {
+        return this._gsettings;
+    }
+
+    getZones() {
+        return this._zones;
+    }
+
+    isZoningEnabled() {
+        return this._gsettings.get_boolean(ENABLE_ZONING_KEY);
+    }
+
+    isRestoreOnUntileEnabled() {
+        return this._gsettings.get_boolean(RESTORE_ON_UNTILE_KEY);
+    }
+
+    isTileNewWindowsEnabled() {
+        return this._gsettings.get_boolean(TILE_NEW_WINDOWS_KEY);
+    }
+
+    isHighlightOnHoverEnabled() {
+        return this._gsettings.get_boolean(HIGHLIGHT_ON_HOVER_KEY);
+    }
+
+    get cycleZoneWindowsAccelerator() {
+        const arr = this._gsettings.get_strv(CYCLE_ACCELERATOR_KEY);
+        return arr.length > 0 ? arr[0] : '';
+    }
+
+    get cycleZoneWindowsBackwardAccelerator() {
+        const arr = this._gsettings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY);
+        return arr.length > 0 ? arr[0] : '';
+    }
+
+    // New getters for tab bar settings
+    getTabBarHeight() {
+        return this._gsettings.get_int(TAB_BAR_HEIGHT_KEY);
+    }
+
+    getTabFontSize() {
+        return this._gsettings.get_int(TAB_FONT_SIZE_KEY);
+    }
+
+    // ADDED: Getter for zone gap size
+    getZoneGapSize() {
+        return this._gsettings.get_int(ZONE_GAP_SIZE_KEY);
+    }
+
+    destroy() {
+        for (const [gobj, ids] of this._signalHandlers) {
+            ids.forEach(id => {
+                try { gobj.disconnect(id); } catch {}
+            });
+        }
+        this._signalHandlers.clear();
+        log('Destroyed.');
+    }
+}
+
+
+
+===== FILE: ./modules/ZoneHighlighter.js =====
+import St from 'gi://St';
+import GObject from 'gi://GObject';
+import Clutter from 'gi://Clutter';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+const log = (msg) => console.log(`[AutoZoner.ZoneHighlighter] ${msg}`);
+
+export class ZoneHighlighter extends St.Bin {
+    static {
+        GObject.registerClass(this);
+    }
+
+    constructor() {
+        super({
+            style_class: 'zone-highlight',
+            visible: false,
+            reactive: false,
+            x_expand: false,
+            y_expand: false,
+            opacity: 0,
+        });
+        Main.uiGroup.add_child(this);
+        // Ensure it's above most other things but below popups/menus if possible
+        // This might need adjustment based on other UI elements.
+        // Setting a high child index:
+        if (Main.uiGroup.get_children().length > 1) {
+             Main.uiGroup.set_child_above_sibling(this, Main.uiGroup.get_last_child());
+        }
+        this._isShowing = false; // Internal state to track intent
+        log("Created and added to uiGroup.");
+    }
+
+    showAt(rect) {
+        this.set_position(Math.round(rect.x), Math.round(rect.y));
+        this.set_size(Math.round(rect.width), Math.round(rect.height));
+
+        this._isShowing = true;
+        if (!this.visible) {
+            this.set_opacity(0); // Ensure opacity is 0 before showing for fade-in
+            super.show(); // Use super.show() to bypass our custom hide logic
+        }
+
+        this.remove_all_transitions(); // Clear any ongoing transitions
+        this.ease({
+            opacity: 255,
+            duration: 100, // Short duration for responsiveness
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+    }
+
+    hideNow() { // An immediate hide without fade
+        this._isShowing = false;
+        this.remove_all_transitions();
+        this.set_opacity(0);
+        super.hide();
+    }
+
+    requestHide() { // Fade out hide
+        this._isShowing = false;
+        if (this.visible) {
+            this.remove_all_transitions();
+            this.ease({
+                opacity: 0,
+                duration: 150, // Slightly longer fade-out
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => {
+                    // Only hide if we still intend to be hidden (i.e., no new showAt was called)
+                    if (!this._isShowing && this.opacity === 0) {
+                        super.hide();
+                    }
+                }
+            });
+        }
+    }
+
+    get isShowingIntent() { // Getter for external modules to check intent
+        return this._isShowing;
+    }
+
+
+    destroy() {
+        log("Destroying...");
+        this.remove_all_transitions();
+        if (this.get_parent()) {
+            this.get_parent().remove_child(this);
+        }
+        super.destroy();
+    }
+}
+
+
+
+===== FILE: ./modules/HighlightManager.js =====
+// modules/HighlightManager.js
+
+import GLib from 'gi://GLib';
+import Meta from 'gi://Meta';
+import Mtk from 'gi://Mtk'; // Added for Mtk.Rectangle
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+import { ZoneHighlighter } from './ZoneHighlighter.js';
+import { ZoneDetector } from './ZoneDetector.js';
+
+const HIGHLIGHT_TIMER_INTERVAL = 30;
+const log = (msg) => console.log(`[AutoZoner.HighlightManager] ${msg}`);
+
+export class HighlightManager {
+    constructor(settingsManager) {
+        this._settingsManager = settingsManager;
+        this._zoneDetector = new ZoneDetector();
+        this._zoneHighlighters = new Map();
+        this._highlightTimerId = 0;
+        this._currentlyHighlightedInfo = null;
+
+        this._initZoneHighlighters();
+        log("Initialized.");
+    }
+
+    _initZoneHighlighters() {
+        this._destroyZoneHighlighters();
+        Main.layoutManager.monitors.forEach((monitor, index) => {
+            const highlighter = new ZoneHighlighter();
+            this._zoneHighlighters.set(index, highlighter);
+        });
+        log(`Initialized ${this._zoneHighlighters.size} highlighters.`);
+    }
+
+    _destroyZoneHighlighters() {
+        this._zoneHighlighters.forEach(highlighter => highlighter.destroy());
+        this._zoneHighlighters.clear();
+        log("Destroyed all highlighters.");
+    }
+
+    _getMonitorWorkArea(monitorIndex) {
+        if (monitorIndex < 0 || monitorIndex >= Main.layoutManager.monitors.length) {
+            return Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+        }
+        return Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+    }
+
+    _updateHighlightOnDrag() {
+        if (this._highlightTimerId === 0) return GLib.SOURCE_REMOVE;
+
+        if (!this._settingsManager.isHighlightOnHoverEnabled()) {
+            if (this._currentlyHighlightedInfo) {
+                this._currentlyHighlightedInfo.highlighter.requestHide();
+                this._currentlyHighlightedInfo = null;
+            }
+            return GLib.SOURCE_REMOVE;
+        }
+
+        const [pointerX, pointerY] = global.get_pointer();
+        // Changed Meta.Rectangle to Mtk.Rectangle
+        const pointerMonitorIndex = global.display.get_monitor_index_for_rect(new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 }));
+
+        if (pointerMonitorIndex === -1) {
+            if (this._currentlyHighlightedInfo) {
+                this._currentlyHighlightedInfo.highlighter.requestHide();
+                this._currentlyHighlightedInfo = null;
+            }
+            return GLib.SOURCE_CONTINUE;
+        }
+
+        const zones = this._settingsManager.getZones();
+        const hoveredZone = this._zoneDetector.findTargetZone(zones, {x: pointerX, y: pointerY}, pointerMonitorIndex);
+        const currentHighlighterOnPointerMonitor = this._zoneHighlighters.get(pointerMonitorIndex);
+
+        if (hoveredZone) {
+            if (!this._currentlyHighlightedInfo ||
+                this._currentlyHighlightedInfo.monitorIndex !== pointerMonitorIndex ||
+                (this._currentlyHighlightedInfo.zone.name || JSON.stringify(this._currentlyHighlightedInfo.zone)) !== (hoveredZone.name || JSON.stringify(hoveredZone))) { // Compare zones more robustly
+
+                if (this._currentlyHighlightedInfo && this._currentlyHighlightedInfo.highlighter) {
+                    this._currentlyHighlightedInfo.highlighter.requestHide();
+                }
+
+                if (currentHighlighterOnPointerMonitor) {
+                    const workArea = this._getMonitorWorkArea(pointerMonitorIndex);
+                    const absoluteZoneRect = {
+                        x: workArea.x + hoveredZone.x, y: workArea.y + hoveredZone.y,
+                        width: hoveredZone.width, height: hoveredZone.height
+                    };
+                    currentHighlighterOnPointerMonitor.showAt(absoluteZoneRect);
+                    this._currentlyHighlightedInfo = {
+                        monitorIndex: pointerMonitorIndex,
+                        zone: hoveredZone, // Store the actual zone object
+                        highlighter: currentHighlighterOnPointerMonitor
+                    };
+                } else {
+                     this._currentlyHighlightedInfo = null;
+                }
+            }
+        } else {
+            if (this._currentlyHighlightedInfo) {
+                if (this._currentlyHighlightedInfo.monitorIndex === pointerMonitorIndex) {
+                    this._currentlyHighlightedInfo.highlighter.requestHide();
+                    this._currentlyHighlightedInfo = null;
+                }
+            }
+        }
+        return GLib.SOURCE_CONTINUE;
+    }
+
+    startUpdating() {
+        if (this._settingsManager.isHighlightOnHoverEnabled()) {
+            if (this._highlightTimerId > 0) GLib.Source.remove(this._highlightTimerId);
+            this._highlightTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, HIGHLIGHT_TIMER_INTERVAL, this._updateHighlightOnDrag.bind(this));
+            log("Started highlight updates.");
+        } else {
+            log("Highlighting disabled, not starting updates.");
+            if (this._highlightTimerId > 0) {
+                GLib.Source.remove(this._highlightTimerId);
+                this._highlightTimerId = 0;
+            }
+             this._hideAllActiveHighlighters();
+        }
+    }
+
+    stopUpdating() {
+        if (this._highlightTimerId > 0) {
+            GLib.Source.remove(this._highlightTimerId);
+            this._highlightTimerId = 0;
+        }
+        this._hideAllActiveHighlighters();
+        this._currentlyHighlightedInfo = null; // Clear this on stop
+        log("Stopped highlight updates.");
+    }
+
+    _hideAllActiveHighlighters() {
+        this._zoneHighlighters.forEach(highlighter => {
+            if (highlighter.isShowingIntent || highlighter.visible) {
+                highlighter.requestHide();
+            }
+        });
+    }
+
+    reinitHighlighters() {
+        this.stopUpdating();
+        this._initZoneHighlighters();
+    }
+
+    destroy() {
+        this.stopUpdating();
+        this._destroyZoneHighlighters();
+        log("Destroyed.");
+    }
+}
+
+
+
+===== FILE: ./modules/Indicator.js =====
+import St from 'gi://St';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js'; // MOVED TO TOP LEVEL
+import { gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
+
+const ENABLE_ZONING_KEY = 'enable-auto-zoning';
+const log = (msg) => console.log(`[AutoZoner.Indicator] ${msg}`);
+
+export class Indicator {
+    constructor(uuid, settingsManager, extensionObject) {
+        this._uuid = uuid;
+        this._settingsManager = settingsManager;
+        this._extensionObject = extensionObject;
+        this._indicator = null;
+        this._toggleItemSignalId = 0;
+        this._prefsItemSignalId = 0;
+
+        this._init();
+        log("Initialized.");
+    }
+
+    _init() {
+        this._indicator = new PanelMenu.Button(0.5, _('Auto Zoner'), false);
+        const icon = new St.Icon({
+            icon_name: 'view-grid-symbolic',
+            style_class: 'system-status-icon',
+        });
+        this._indicator.add_child(icon);
+        this._buildMenu();
+        Main.panel.addToStatusArea(this._uuid, this._indicator); // Main is imported at top
+    }
+
+    _buildMenu() {
+        if (!this._indicator) return;
+        this._indicator.menu.removeAll();
+
+        const zoningEnabled = this._settingsManager.isZoningEnabled();
+        const toggleItem = new PopupMenu.PopupSwitchMenuItem(
+            _("Enable Auto Zoning"),
+            zoningEnabled
+        );
+
+        // Ensure we don't double-connect if _buildMenu is called multiple times
+        if(this._toggleItemSignalId > 0) {
+            try { if (toggleItem.is_connected(this._toggleItemSignalId)) toggleItem.disconnect(this._toggleItemSignalId); }
+            catch(e) { /* ignore */ }
+        }
+        this._toggleItemSignalId = toggleItem.connect('toggled', (item) => {
+            this._settingsManager.getGSettingObject().set_boolean(ENABLE_ZONING_KEY, item.state);
+        });
+        this._indicator.menu.addMenuItem(toggleItem);
+
+        this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        const prefsItem = new PopupMenu.PopupMenuItem(_('Settings'));
+         if(this._prefsItemSignalId > 0) {
+            try { if (prefsItem.is_connected(this._prefsItemSignalId)) prefsItem.disconnect(this._prefsItemSignalId); }
+            catch(e) { /* ignore */ }
+        }
+        this._prefsItemSignalId = prefsItem.connect('activate', () => {
+            this._extensionObject.openPreferences();
+        });
+        this._indicator.menu.addMenuItem(prefsItem);
+    }
+
+    updateToggleState() {
+        if (!this._indicator || !this._indicator.menu) return;
+        const menuItems = this._indicator.menu._getMenuItems();
+        if (menuItems && menuItems.length > 0 && menuItems[0] instanceof PopupMenu.PopupSwitchMenuItem) {
+            // Temporarily disconnect to prevent feedback loop if setToggleState itself emits 'toggled'
+            const toggleItem = menuItems[0];
+            const wasConnected = this._toggleItemSignalId > 0 && toggleItem.is_connected(this._toggleItemSignalId);
+            if (wasConnected) toggleItem.disconnect(this._toggleItemSignalId);
+            
+            toggleItem.setToggleState(this._settingsManager.isZoningEnabled());
+            
+            if (wasConnected) { // Reconnect if it was previously connected
+                 this._toggleItemSignalId = toggleItem.connect('toggled', (item) => {
+                    this._settingsManager.getGSettingObject().set_boolean(ENABLE_ZONING_KEY, item.state);
+                });
+            }
+        }
+    }
+
+    destroy() {
+        // Attempt to disconnect signals from menu items before destroying the indicator
+        if (this._indicator && this._indicator.menu) {
+            const menuItems = this._indicator.menu._getMenuItems();
+            if (this._toggleItemSignalId > 0 && menuItems && menuItems.length > 0 && menuItems[0] instanceof PopupMenu.PopupSwitchMenuItem) {
+                const toggleItem = menuItems[0];
+                try { if(toggleItem.is_connected(this._toggleItemSignalId)) toggleItem.disconnect(this._toggleItemSignalId); } catch(e) {/*ignore*/}
+            }
+             if (this._prefsItemSignalId > 0 && menuItems && menuItems.length > 2 && menuItems[2] instanceof PopupMenu.PopupMenuItem) { // Index 2 if separator is present
+                const prefsItem = menuItems[2];
+                 try { if(prefsItem.is_connected(this._prefsItemSignalId)) prefsItem.disconnect(this._prefsItemSignalId); } catch(e) {/*ignore*/}
+            }
+        }
+        this._toggleItemSignalId = 0;
+        this._prefsItemSignalId = 0;
+
+        if (this._indicator) {
+            this._indicator.destroy();
+            this._indicator = null;
+        }
+        log("Destroyed.");
+    }
+}
+
+
+
+===== FILE: ./prefs.js =====
+// prefs.js
+
+import Adw from 'gi://Adw';
+import Gtk from 'gi://Gtk';
+import Gio from 'gi://Gio';
+import GObject from 'gi://GObject';
+import Gdk from 'gi://Gdk';
+
+import { ExtensionPreferences, gettext as _ } from
+        'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+
+const ZONE_SETTINGS_KEY                     = 'zones';
+const ENABLE_ZONING_KEY                     = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY                 = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY                  = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY                = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator';
+const TAB_BAR_HEIGHT_KEY                    = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                     = 'tab-font-size';
+const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size'; // ADDED
+
+const log = msg => console.log(`[AutoZonerPrefs] ${msg}`);
+
+class ZoneEditorGrid extends Gtk.Grid {
+    static {
+        GObject.registerClass({ Signals: { 'changed': {} } }, this);
+    }
+
+    constructor(zoneData, monitorCount) {
+        super({
+            column_spacing: 12,
+            row_spacing:    6,
+            margin_top:     10,
+            margin_bottom:  10,
+            margin_start:   10,
+            margin_end:     10,
+            hexpand:        true,
+        });
+
+        this._zone = { ...zoneData };
+
+        // Name
+        this.attach(
+            new Gtk.Label({ label: _('Name:'), halign: Gtk.Align.END }),
+            0, 0, 1, 1
+        );
+        this._nameEntry = new Gtk.Entry({ text: this._zone.name || '', hexpand: true });
+        this._nameEntry.connect('changed', () => {
+            this._zone.name = this._nameEntry.get_text();
+            this.emit('changed');
+        });
+        this.attach(this._nameEntry, 1, 0, 3, 1);
+
+        // Monitor Index
+        this.attach(
+            new Gtk.Label({ label: _('Monitor Index:'), halign: Gtk.Align.END }),
+            0, 1, 1, 1
+        );
+        this._monitorSpin = Gtk.SpinButton.new_with_range(0, Math.max(0, monitorCount - 1), 1);
+        this._monitorSpin.set_value(this._zone.monitorIndex || 0);
+        this._monitorSpin.connect('value-changed', () => {
+            this._zone.monitorIndex = this._monitorSpin.get_value_as_int();
+            this.emit('changed');
+        });
+        this.attach(this._monitorSpin, 1, 1, 1, 1);
+
+        // X, Y, Width, Height
+        const fields = [
+            { label: _('X:'),      key: 'x' },
+            { label: _('Y:'),      key: 'y' },
+            { label: _('Width:'),  key: 'width' },
+            { label: _('Height:'), key: 'height' }
+        ];
+        fields.forEach((f, i) => {
+            const row = Math.floor(i / 2) + 2;
+            const col = (i % 2) * 2;
+            this.attach(
+                new Gtk.Label({ label: f.label, halign: Gtk.Align.END }),
+                col, row, 1, 1
+            );
+            const spin = Gtk.SpinButton.new_with_range(0, 10000, 10);
+            spin.set_value(this._zone[f.key] || 0);
+            spin.set_hexpand(true);
+            spin.connect('value-changed', () => {
+                this._zone[f.key] = spin.get_value_as_int();
+                this.emit('changed');
+            });
+            this.attach(spin, col + 1, row, 1, 1);
+        });
+    }
+
+    get_zone_data() {
+        return { ...this._zone };
+    }
+}
+
+export default class AutoZonerPrefs extends ExtensionPreferences {
+    fillPreferencesWindow(window) {
+        this._settings = this.getSettings();
+        this._window   = window;
+
+        const display      = Gdk.Display.get_default();
+        const monitorCount = display.get_monitors().get_n_items();
+
+        const page = new Adw.PreferencesPage();
+        window.add(page);
+
+        // General Settings Group
+        const generalGroup = new Adw.PreferencesGroup({ title: _('General Settings') });
+        page.add(generalGroup);
+
+        // Enable Auto Zoning
+        const enableSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+        this._settings.bind(ENABLE_ZONING_KEY, enableSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
+        const enableRow = new Adw.ActionRow({
+            title: _('Enable Auto Zoning'),
+            subtitle: _('Globally enable or disable the extension'),
+            activatable_widget: enableSwitch
+        });
+        enableRow.add_suffix(enableSwitch);
+        generalGroup.add(enableRow);
+
+        // Highlight on Hover
+        const hoverSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+        this._settings.bind(HIGHLIGHT_ON_HOVER_KEY, hoverSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
+        const hoverRow = new Adw.ActionRow({
+            title: _('Highlight Zone on Hover'),
+            subtitle: _('Visually highlight a zone when dragging a window over it'),
+            activatable_widget: hoverSwitch
+        });
+        hoverRow.add_suffix(hoverSwitch);
+        generalGroup.add(hoverRow);
+
+        // Restore Original Size on Untile
+        const restoreSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+        this._settings.bind(RESTORE_ON_UNTILE_KEY, restoreSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
+        const restoreRow = new Adw.ActionRow({
+            title: _('Restore Original Size on Untile'),
+            subtitle: _('When a window leaves all zones, restore its original size/position'),
+            activatable_widget: restoreSwitch
+        });
+        restoreRow.add_suffix(restoreSwitch);
+        generalGroup.add(restoreRow);
+
+        // Tile New Windows
+        const tileSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+        this._settings.bind(TILE_NEW_WINDOWS_KEY, tileSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
+        const tileRow = new Adw.ActionRow({
+            title: _('Tile New Windows'),
+            subtitle: _('Automatically tile newly opened windows if they fall into a zone'),
+            activatable_widget: tileSwitch
+        });
+        tileRow.add_suffix(tileSwitch);
+        generalGroup.add(tileRow);
+
+        // Cycle Zone Windows Shortcut (forward)
+        const accelEntry = new Gtk.Entry({
+            hexpand: true,
+            placeholder_text: '<Control><Alt>8'
+        });
+        const existing = this._settings.get_strv(CYCLE_ACCELERATOR_KEY);
+        accelEntry.set_text(existing[0] || '');
+        accelEntry.connect('activate', () => {
+            const text = accelEntry.get_text().trim();
+            if (text) {
+                this._settings.set_strv(CYCLE_ACCELERATOR_KEY, [ text ]);
+                log(`Saved cycle shortcut: ${text}`);
+            }
+        });
+        const accelRow = new Adw.ActionRow({
+            title: _('Cycle Zone Windows Shortcut'),
+            subtitle: _('Type accelerator (e.g. <Control><Alt>8) then Enter'),
+            activatable_widget: accelEntry
+        });
+        accelRow.add_suffix(accelEntry);
+        generalGroup.add(accelRow);
+
+        // Cycle Zone Windows Backward Shortcut
+        const backwardAccelEntry = new Gtk.Entry({
+            hexpand: true,
+            placeholder_text: '<Control><Alt>9'
+        });
+        const existingBackward = this._settings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY);
+        backwardAccelEntry.set_text(existingBackward[0] || '');
+        backwardAccelEntry.connect('activate', () => {
+            const text = backwardAccelEntry.get_text().trim();
+            if (text) {
+                this._settings.set_strv(CYCLE_BACKWARD_ACCELERATOR_KEY, [ text ]);
+                log(`Saved backward cycle shortcut: ${text}`);
+            }
+        });
+        const backwardAccelRow = new Adw.ActionRow({
+            title: _('Cycle Zone Windows Backward Shortcut'),
+            subtitle: _('Type accelerator (e.g. <Control><Alt>9) then Enter'),
+            activatable_widget: backwardAccelEntry
+        });
+        backwardAccelRow.add_suffix(backwardAccelEntry);
+        generalGroup.add(backwardAccelRow);
+        
+        // Tab Bar Height
+        const heightSpin = Gtk.SpinButton.new_with_range(16, 200, 1);
+        heightSpin.set_value(this._settings.get_int(TAB_BAR_HEIGHT_KEY));
+        heightSpin.connect('value-changed', () => {
+            this._settings.set_int(TAB_BAR_HEIGHT_KEY, heightSpin.get_value_as_int());
+        });
+        const heightRow = new Adw.ActionRow({
+            title: _('Tab Bar Height (px)'),
+            subtitle: _('Height in pixels for the tab bar'),
+            activatable_widget: heightSpin
+        });
+        heightRow.add_suffix(heightSpin);
+        generalGroup.add(heightRow);
+
+        // Tab Font Size
+        const fontSpin = Gtk.SpinButton.new_with_range(6, 72, 1);
+        fontSpin.set_value(this._settings.get_int(TAB_FONT_SIZE_KEY));
+        fontSpin.connect('value-changed', () => {
+            this._settings.set_int(TAB_FONT_SIZE_KEY, fontSpin.get_value_as_int());
+        });
+        const fontRow = new Adw.ActionRow({
+            title: _('Tab Font Size (px)'),
+            subtitle: _('Font size in pixels for the tab labels'),
+            activatable_widget: fontSpin
+        });
+        fontRow.add_suffix(fontSpin);
+        generalGroup.add(fontRow);
+
+        // Zone Gap Size (ADDED)
+        const gapSpin = Gtk.SpinButton.new_with_range(0, 50, 1); // Min 0, Max 50, Step 1
+        gapSpin.set_value(this._settings.get_int(ZONE_GAP_SIZE_KEY));
+        gapSpin.connect('value-changed', () => {
+            this._settings.set_int(ZONE_GAP_SIZE_KEY, gapSpin.get_value_as_int());
+        });
+        const gapRow = new Adw.ActionRow({
+            title: _('Zone Gap Size (px)'),
+            subtitle: _('Gap around zones. 0 for no gaps. Re-snap windows to apply.'),
+            activatable_widget: gapSpin
+        });
+        gapRow.add_suffix(gapSpin);
+        generalGroup.add(gapRow);
+
+
+        // Zone Definitions Group
+        this._zonesGroup = new Adw.PreferencesGroup({
+            title: _('Zone Definitions'),
+            description: _('Define screen areas where windows will tile automatically.')
+        });
+        page.add(this._zonesGroup);
+
+        this._loadZonesToUI(monitorCount);
+
+        this._addButtonRow = new Adw.ActionRow();
+        const addButton = new Gtk.Button({
+            label: _('Add New Zone'),
+            halign: Gtk.Align.CENTER,
+            css_classes: ['suggested-action']
+        });
+        addButton.connect('clicked', () => this._addZone(monitorCount));
+        this._addButtonRow.set_child(addButton);
+        this._zonesGroup.add(this._addButtonRow);
+    }
+
+    _loadZonesToUI(monitorCount) {
+        let child = this._zonesGroup.get_first_child();
+        while (child) {
+            const next = child.get_next_sibling();
+            if (child instanceof Adw.ExpanderRow)
+                this._zonesGroup.remove(child);
+            child = next;
+        }
+
+        let zones = [];
+        try {
+            zones = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY));
+            if (!Array.isArray(zones)) zones = [];
+        } catch (e) {
+            log(`Error parsing zones JSON: ${e}`);
+            zones = [];
+        }
+
+        zones.forEach(zoneData => this._createAndAddZoneExpander(zoneData, monitorCount));
+    }
+
+    _createAndAddZoneExpander(zoneData, monitorCount) {
+        const editorGrid = new ZoneEditorGrid(zoneData, monitorCount);
+        const expanderRow = new Adw.ExpanderRow({
+            title: zoneData.name || _('Unnamed Zone'),
+            subtitle: `X:${zoneData.x}, Y:${zoneData.y}, W:${zoneData.width}, H:${zoneData.height}, M:${zoneData.monitorIndex + 1}`
+        });
+        expanderRow.add_row(editorGrid);
+
+        const removeButton = new Gtk.Button({
+            icon_name: 'edit-delete-symbolic',
+            valign: Gtk.Align.CENTER,
+            tooltip_text: _("Remove this zone"),
+            css_classes: ['flat', 'circular']
+        });
+        expanderRow.add_suffix(removeButton);
+        expanderRow.set_enable_expansion(true);
+
+        editorGrid.connect('changed', () => {
+            const cd = editorGrid.get_zone_data();
+            expanderRow.title    = cd.name || _('Unnamed Zone');
+            expanderRow.subtitle = `X:${cd.x}, Y:${cd.y}, W:${cd.width}, H:${cd.height}, M:${cd.monitorIndex + 1}`;
+            this._saveZones();
+        });
+
+        removeButton.connect('clicked', () => {
+            const dialog = new Adw.MessageDialog({
+                heading: _("Remove Zone?"),
+                body:    _("Are you sure you want to remove “%s”?").format(expanderRow.title),
+                transient_for: this._window,
+                modal: true
+            });
+            dialog.add_response("cancel", _("Cancel"));
+            dialog.add_response("remove", _("Remove"));
+            dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE);
+            dialog.connect("response", (d, resp) => {
+                if (resp === "remove") {
+                    this._zonesGroup.remove(expanderRow);
+                    this._saveZones();
+                }
+                d.destroy();
+            });
+            dialog.present();
+        });
+
+        if (this._addButtonRow)
+            this._zonesGroup.add_before(expanderRow, this._addButtonRow);
+        else
+            this._zonesGroup.add(expanderRow);
+    }
+
+    _addZone(monitorCount) {
+        let current = [];
+        try {
+            current = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)) || [];
+        } catch {}
+        const idx = current.length + 1;
+        const newZone = {
+            monitorIndex: 0,
+            name:         _('New Zone %d').format(idx),
+            x: 0, y: 0, width: 1280, height: 720
+        };
+        this._createAndAddZoneExpander(newZone, monitorCount);
+        this._saveZones();
+    }
+
+    _saveZones() {
+        const zones = [];
+        let child = this._zonesGroup.get_first_child();
+        while (child) {
+            if (child instanceof Adw.ExpanderRow && child.get_n_rows() > 0) {
+                const grid = child.get_row_at_index(0);
+                zones.push(grid.get_zone_data());
+            }
+            child = child.get_next_sibling();
+        }
+        this._settings.set_string(ZONE_SETTINGS_KEY, JSON.stringify(zones));
+        log(`Saved ${zones.length} zones.`);
+    }
+}
+
+
+
+===== FILE: ./stylesheet.css =====
+/* Add this for the highlighter */
+.zone-highlight {
+    background-color: rgba(78, 154, 249, 0.2); /* A semi-transparent blue */
+    border: 2px solid rgba(78, 154, 249, 0.6);
+    border-radius: 6px;
+    /* transition: opacity 100ms ease-out, all 50ms ease-out; */ /* Optional: for smoother transitions */
+}
+
+/* stylesheet.css */
+
+.zone-tab-bar {
+    background-color: rgba(0, 0, 0, 0.15);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+    height: 32px;
+    transition: opacity 200ms ease-out;
+    z-index: 999;
+}
+
+.zone-tab-bar > .zone-tab {
+    padding: 4px 10px;
+    margin-right: 5px;
+    border-radius: 4px 4px 0 0;
+    background-color: rgba(50, 50, 50, 0.8);
+    color: #ffffff;
+    font-size: 13px;
+    min-height: 24px;
+    line-height: 24px;
+}
+
+.zone-tab-bar > .zone-tab:hover {
+    background-color: rgba(78, 154, 249, 0.6);
+    cursor: pointer;
+}
+
+.zone-tab.active {
+    background-color: rgba(78, 154, 249, 0.8);
+    color: #000000;
+}
+
+
+
+
+===== FILE: ./default_zones.json =====
+[
+  {
+    "monitorIndex": 0,
+    "name": "Left",
+    "x": 0,
+    "y": 0,
+    "width": 1800,
+    "height": 1440
+  },
+  {
+    "monitorIndex": 0,
+    "name": "center",
+    "x": 1800,
+    "y": 0,
+    "width": 1800,
+    "height": 1440
+  },
+   {
+    "monitorIndex": 0,
+    "name": "Right",
+    "x": 3600,
+    "y": 0,
+    "width": 1520,
+    "height": 1440
+  }
+]
+
+
+

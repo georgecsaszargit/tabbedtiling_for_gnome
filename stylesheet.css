@@ -19,7 +19,7 @@
 .zone-tab-bar > .zone-tab {
     padding: 4px 10px;
     margin-right: 5px;
-    border-radius: 4px 4px 0 0;
+    border-radius: 10px 10px 0 0;
     background-color: rgba(50, 50, 50, 0.8);
     color: #ffffff;
     font-size: 13px;

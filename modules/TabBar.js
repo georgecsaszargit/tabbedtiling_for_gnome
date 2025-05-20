@@ -73,7 +73,7 @@ export class TabBar extends St.BoxLayout {
             if (gicon) {
                 appIconActor = new St.Icon({
                     gicon: gicon,
-                    icon_size: 16,
+                    icon_size: 24,
                     style_class: 'zone-tab-app-icon'
                 });
                 tabContentBox.add_child(appIconActor);
