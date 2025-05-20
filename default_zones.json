@@ -12,13 +12,13 @@
     "name": "center",
     "x": 1800,
     "y": 0,
-    "width": 1700,
+    "width": 1800,
     "height": 1440
   },
    {
     "monitorIndex": 0,
     "name": "Right",
-    "x": 3500,
+    "x": 3600,
     "y": 0,
     "width": 1520,
     "height": 1440
