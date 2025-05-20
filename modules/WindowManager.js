@@ -3,7 +3,7 @@
 import Meta from 'gi://Meta';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
-import Mtk from 'gi://Mtk'; // Added for Mtk.Rectangle
+import Mtk from 'gi://Mtk'; // For Mtk.Rectangle
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { ZoneDetector } from './ZoneDetector.js';
@@ -11,7 +11,6 @@ import { TabBar }       from './TabBar.js';
 
 const log = (context, msg) => console.log(`[AutoZoner.WindowManager.${context}] ${msg}`);
 
-// Define masks for grab operations
 const ALL_RESIZING_OPS = Meta.GrabOp.RESIZING_N | Meta.GrabOp.RESIZING_S |
                          Meta.GrabOp.RESIZING_E | Meta.GrabOp.RESIZING_W |
                          Meta.GrabOp.RESIZING_NW | Meta.GrabOp.RESIZING_NE |
@@ -63,8 +62,11 @@ export class WindowManager {
             return;
         if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
             return;
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 100, () => {
-            if (window.is_destroyed()) return GLib.SOURCE_REMOVE;
+        // For window created, it's possible it's not fully formed yet.
+        // A short delay might be better before checking its state.
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { // Increased delay slightly
+            // Check if window is still valid (not null) before accessing properties
+            if (!window || typeof window.get_frame_rect !== 'function') return GLib.SOURCE_REMOVE;
 
             const rect   = window.get_frame_rect();
             const center = { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
@@ -102,24 +104,16 @@ export class WindowManager {
     _onGrabOpEnd(display, window, op) {
         this._highlightManager?.stopUpdating();
 
-        // Prioritize known move operations
         if (op === Meta.GrabOp.MOVING || op === Meta.GrabOp.KEYBOARD_MOVING) {
             log('_onGrabOpEnd', `Operation is MOVING or KEYBOARD_MOVING (op: ${op}), proceeding to snap logic.`);
-            // This is a definite move, proceed to snap logic below.
         } else if ((op & ALL_RESIZING_OPS) !== 0) {
-            // If it's not one of the above specific moves, check if it's a resize.
             log('_onGrabOpEnd', `Operation is RESIZING (op: ${op}) and not a direct move type, skipping snap.`);
-            return; // It's a resize, so skip snapping.
+            return;
         } else {
-            // Neither a direct move type we recognize explicitly above, nor a resize type.
-            // This could be Meta.GrabOp.NONE or some other action.
-            // For safety, and to prevent snapping on unexpected operations, skip.
             log('_onGrabOpEnd', `Operation is UNKNOWN or not a snappable type (op: ${op}), skipping snap.`);
             return;
         }
 
-        // --- Main snapping logic from here ---
-        // This part is only reached if the conditions above determined it's a valid operation for snapping (e.g., a move)
         if (!this._settingsManager.isZoningEnabled()) return;
 
         if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) {
@@ -128,7 +122,7 @@ export class WindowManager {
         }
 
         const [pointerX, pointerY] = global.get_pointer();
-        const hitRect = new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 }); // Changed Meta.Rectangle
+        const hitRect = new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 });
         let mon = global.display.get_monitor_index_for_rect(hitRect);
         if (mon < 0)
             mon = window.get_monitor();
@@ -280,8 +274,11 @@ export class WindowManager {
 
         if (!isGrabOpContext) {
             GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
-                if (window && !window.is_destroyed() && window._autoZonerZoneId === zoneId &&
-                    window.get_maximized() === Meta.MaximizeFlags.NONE && !window.is_fullscreen()) {
+                // Check if window and its properties are still accessible and relevant
+                if (window && typeof window.get_frame_rect === 'function' && // Basic check for GObject validity
+                    window._autoZonerZoneId === zoneId &&
+                    window.get_maximized() === Meta.MaximizeFlags.NONE && 
+                    !window.is_fullscreen()) {
                     
                     const currentRect = window.get_frame_rect();
                     const checkWa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
