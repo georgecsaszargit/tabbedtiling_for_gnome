@@ -4,23 +4,23 @@
     "name": "Left",
     "x": 0,
     "y": 0,
-    "width": 2560,
+    "width": 1800,
     "height": 1440
   },
   {
     "monitorIndex": 0,
     "name": "center",
-    "x": 2560,
+    "x": 1800,
     "y": 0,
-    "width": 1280,
+    "width": 1700,
     "height": 1440
   },
    {
     "monitorIndex": 0,
     "name": "Right",
-    "x": 3840,
+    "x": 3500,
     "y": 0,
-    "width": 1280,
+    "width": 1520,
     "height": 1440
   }
 ]
