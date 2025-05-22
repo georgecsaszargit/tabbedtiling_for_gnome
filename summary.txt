@@ -764,196 +764,225 @@ export class ZoneDetector {
 
 ===== FILE: ./modules/TabBar.js =====
 // modules/TabBar.js
+//
+// ▸ Single-click selects the tab via 'clicked' signal
+// ▸ Drag only while Button-1 held; on drop tabs snap into perfect grid
+// ▸ clear_transforms() + queue_relayout() guarantee no overlap / no gaps
+// ▸ _midPoint() guarded with try/catch so “undefined” errors disappear
+//
 
-import St from 'gi://St';
-import GObject from 'gi://GObject';
-import Clutter from 'gi://Clutter';
-import Shell from 'gi://Shell'; // Needed for Shell.AppSystem and Shell.WindowTracker
+import St       from 'gi://St';
+import GObject  from 'gi://GObject';
+import Clutter  from 'gi://Clutter';
+import Shell    from 'gi://Shell';
 
-const tbLog = (zoneId, msg) => {
-    let zId = typeof zoneId === 'string' && zoneId.startsWith('{') ? 'JSON_Zone' : zoneId;
-    console.log(`[AutoZoner.TabBar (${zId})] ${msg}`);
-};
+const DRAG_THRESHOLD = 4;
+const BTN1_MASK      = Clutter.ModifierType.BUTTON1_MASK;
 
 export class TabBar extends St.BoxLayout {
-    static {
-        GObject.registerClass(this);
-    }
+    static { GObject.registerClass(this); }
 
-    constructor(zoneId, onTabClicked, settingsManager) {
-        super({
-            style_class: 'zone-tab-bar',
-            vertical: false,
-            x_expand: true,
-            y_expand: false,
-            reactive: true,
-        });
+    constructor(zoneId, onTabClicked, settingsMgr) {
+        super({ style_class: 'zone-tab-bar', vertical: false, x_expand: true, reactive: true });
+
         this._zoneId          = zoneId;
         this._onTabClicked    = onTabClicked;
-        this._settingsManager = settingsManager;
+        this._settingsMgr     = settingsMgr;
         this._tabs            = [];
         this.visible          = false;
-        this.opacity          = 255;
-        // Get WindowTracker once
-        this._windowTracker = Shell.WindowTracker.get_default();
+
+        this._windowTracker   = Shell.WindowTracker.get_default();
+        this._dragInfo        = null;
     }
 
-    addWindow(window) {
-        if (this._tabs.some(t => t.window === window)) {
-            this.highlightWindow(window);
+    /*──────────────────────── PUBLIC ────────────────────────*/
+    addWindow(win) {
+        if (this._tabs.some(t => t.window === win)) {
+            this.highlightWindow(win);
             return;
         }
 
-        const app = this._windowTracker.get_window_app(window);
+        const app   = this._windowTracker.get_window_app(win);
+        const label = this._makeLabelText(win, app);
+        const actor = this._buildTabActor(label, app);
 
-        let labelText;
-        if (app) {
-            labelText = app.get_name() || window.get_title() || 'Untitled Window';
-        } else {
-            const wmClass = window.get_wm_class();
-            if (wmClass) {
-                labelText = wmClass
-                    .replace(/[-_.]+/g, ' ')
-                    .split(' ')
-                    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-                    .join(' ') || window.get_title() || 'Untitled Window';
-            } else {
-                labelText = window.get_title() || 'Untitled Window';
-            }
-        }
+        this._initPointerHandlers(actor, win);
 
-        const tabButton = new St.Button({
-            style_class: 'zone-tab',
-            reactive: true,
-        });
+        const unmanageId = win.connect('unmanaging', w => this.removeWindow(w));
+        this.add_child(actor);
+        this._tabs.push({ window: win, actor, unmanageId, label });
 
-        const tabContentBox = new St.BoxLayout({
-            vertical: false,
-        });
-        tabButton.set_child(tabContentBox);
-
-        let appIconActor = null;
-        if (app) {
-            const gicon = app.get_icon();
-            if (gicon) {
-                appIconActor = new St.Icon({
-                    gicon: gicon,
-                    icon_size: 16,
-                    style_class: 'zone-tab-app-icon'
-                });
-                tabContentBox.add_child(appIconActor);
-            }
-        }
-
-        const fontSize = this._settingsManager.getTabFontSize();
-        const titleLabel = new St.Label({
-            text: labelText,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        let titleStyle = `font-size: ${fontSize}px;`;
-        if (appIconActor) {
-            titleStyle += ' margin-left: 5px;';
-        }
-        titleLabel.set_style(titleStyle);
-        tabContentBox.add_child(titleLabel);
-
-        const onTabPress = () => {
-            this._onTabClicked(window);
-            return Clutter.EVENT_STOP;
-        };
-        tabButton.connect('button-press-event', onTabPress);
-
-        const unmanagingSignalId = window.connect('unmanaging', (metaWindow) => {
-            tbLog(this._zoneId, `Window "${metaWindow.get_title() || labelText}" is unmanaging. Removing tab.`);
-            this._onWindowUnmanaging(metaWindow);
-        });
-
-        this.add_child(tabButton);
-        this._tabs.push({ window, actor: tabButton, unmanagingSignalId, labelText });
         this.visible = true;
-        this.highlightWindow(window);
-        tbLog(this._zoneId, `Added tab for "${labelText}". Total tabs: ${this._tabs.length}`);
+        this.highlightWindow(win);
     }
 
-    _onWindowUnmanaging(unmanagingWindow) {
-        const idx = this._tabs.findIndex(t => t.window === unmanagingWindow);
-        if (idx >= 0) {
-            const { actor, labelText } = this._tabs[idx];
-            // Note: unmanagingSignalId is automatically disconnected when 'actor' (the St.Button) is destroyed,
-            // if 'window' was the source of the signal and actor was its direct handler.
-            // However, since 'window' is the source and 'this._onWindowUnmanaging' is the callback,
-            // the signal connection is on 'window' itself. It should be explicitly disconnected if 'window' isn't destroyed with the actor.
-            // But 'unmanaging' means the window *is* going away, so further access might be risky.
-            // The signal is on `window` object, `disconnect` was correct.
-            // The `unmanagingSignalId` is already disconnected automatically by GObject when `unmanagingWindow` is finalized.
-            // Explicitly removing it before actor destruction is good practice if there's any doubt.
-            // However, the main issue is accessing a potentially invalid 'unmanagingWindow' object.
-            // At this point, 'unmanagingWindow' is emitting 'unmanaging', so it's still valid for this callback.
-            this.remove_child(actor);
-            actor.destroy();
-            this._tabs.splice(idx, 1);
-            tbLog(this._zoneId, `Tab for unmanaged window "${labelText}" removed. Remaining tabs: ${this._tabs.length}`);
-            if (this._tabs.length === 0) {
-                this.visible = false;
-                tbLog(this._zoneId, "Became empty, hiding TabBar.");
-            }
-        } else {
-            tbLog(this._zoneId, `Window "${unmanagingWindow.get_title()}" was unmanaged but not found in tabs list.`);
-        }
+    removeWindow(win) {
+        const idx = this._tabs.findIndex(t => t.window === win);
+        if (idx < 0) return;
+
+        const { actor, unmanageId } = this._tabs[idx];
+        if (this._dragInfo && this._dragInfo.actor === actor)
+            this._cancelDrag();
+
+        try { win.disconnect(unmanageId); } catch {}
+        actor.destroy();
+        this._tabs.splice(idx, 1);
+        if (!this._tabs.length) this.visible = false;
     }
 
-    removeWindow(window) {
-        const idx = this._tabs.findIndex(t => t.window === window);
-        if (idx >= 0) {
-            const { actor, unmanagingSignalId, labelText } = this._tabs[idx];
-            if (unmanagingSignalId && window) { // Check if window is not null
-                try {
-                    window.disconnect(unmanagingSignalId);
-                } catch (e) {
-                    tbLog(this._zoneId, `Error disconnecting window unmanaging signal for "${labelText}" during removeWindow: ${e.message}`);
-                }
-            }
-            this.remove_child(actor);
-            actor.destroy();
-            this._tabs.splice(idx, 1);
-            tbLog(this._zoneId, `Explicitly removed tab for "${labelText}". Remaining tabs: ${this._tabs.length}`);
-        }
-        if (this._tabs.length === 0) {
-            this.visible = false;
-            tbLog(this._zoneId, "Became empty after removeWindow, hiding TabBar.");
-        }
-    }
-
-    highlightWindow(window) {
+    highlightWindow(win) {
         this._tabs.forEach(({ window: w, actor }) => {
-            if (w === window)
-                actor.add_style_class_name('active');
-            else
-                actor.remove_style_class_name('active');
+            if (w === win) actor.add_style_class_name('active');
+            else           actor.remove_style_class_name('active');
         });
+    }
+
+    /*────────── POINTER / DRAG-REORDER LOGIC ─────────*/
+    _initPointerHandlers(actor, win) {
+        /* normal click */
+        actor.connect('clicked', () => this._onTabClicked(win));
+
+        /* drag logic */
+        actor.connect('button-press-event', (a, ev) => {
+            if (ev.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+
+            const [stageX] = ev.get_coords();
+            this._dragInfo = {
+                actor,
+                window   : win,
+                startX   : stageX,
+                dragged  : false,
+                motionId : global.stage.connect('motion-event',  this._onMotion.bind(this)),
+                releaseId: global.stage.connect('button-release-event', this._onRelease.bind(this)),
+            };
+            return Clutter.EVENT_STOP;
+        });
+    }
+
+    _onMotion(stage, ev) {
+        if (!this._dragInfo) return Clutter.EVENT_PROPAGATE;
+
+        const actor = this._dragInfo.actor;
+        if (!actor || !actor.get_stage || !actor.get_stage()) {   // disposed mid-drag
+            this._cancelDrag();
+            return Clutter.EVENT_PROPAGATE;
+        }
+        if (!(ev.get_state() & BTN1_MASK)) return Clutter.EVENT_PROPAGATE; // button up
+
+        const [stageX] = ev.get_coords();
+        const dx       = stageX - this._dragInfo.startX;
+
+        if (!this._dragInfo.dragged && Math.abs(dx) >= DRAG_THRESHOLD) {
+            this._dragInfo.dragged = true;
+            actor.add_style_class_name('dragging');
+            (actor.raise_top?.bind(actor) ?? actor.raise).call(actor, null);
+        }
+        if (!this._dragInfo.dragged) return Clutter.EVENT_PROPAGATE;
+
+        actor.set_translation(dx, 0, 0);
+        this._reinsertActorByMidpoint(actor);
+        return Clutter.EVENT_STOP;
+    }
+
+    _onRelease(stage, ev) {
+        if (!this._dragInfo || ev.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+        this._finishDrag();
+        return Clutter.EVENT_STOP;
+    }
+
+    _finishDrag() {
+        if (!this._dragInfo) return;
+
+        const { actor, window, dragged } = this._dragInfo;
+
+        if (actor.get_stage?.call(actor))
+            this._reinsertActorByMidpoint(actor);
+
+        this._cancelDrag();
+
+        if (actor.get_stage?.call(actor)) {
+            actor.clear_transforms();           // ensures translation == 0
+            this.queue_relayout();              // force layout recalculation
+            actor.remove_style_class_name('dragging');
+        }
+
+        /* Activate window only if it was a drag-drop (normal click handled by 'clicked') */
+        if (dragged)
+            this._onTabClicked(window);
+    }
+
+    _cancelDrag() {
+        if (!this._dragInfo) return;
+        global.stage.disconnect(this._dragInfo.motionId);
+        global.stage.disconnect(this._dragInfo.releaseId);
+        this._dragInfo = null;
+    }
+
+    /*────────── HELPERS ──────────*/
+    _midPoint(actor) {
+        try {
+            if (!actor || !actor.get_stage || !actor.get_stage()) return 0;
+            const [tx]  = typeof actor.get_translation === 'function'
+                ? actor.get_translation()
+                : [actor.translation_x || 0];
+            const box   = actor.get_allocation_box ? actor.get_allocation_box() : null;
+            if (!box) return 0;
+            const width = box.x2 - box.x1;
+            return box.x1 + tx + width / 2;
+        } catch { return 0; }
+    }
+
+    _reinsertActorByMidpoint(actor) {
+        const myMid = this._midPoint(actor);
+        const kids  = [...this.get_children()];
+        let newIdx  = 0;
+
+        kids.forEach((child, i) => {
+            if (child === actor) return;
+            if (myMid > this._midPoint(child)) newIdx = i + 1;
+        });
+
+        const curIdx = this._indexOfActor(actor);
+        if (newIdx !== curIdx) {
+            this.set_child_at_index(actor, newIdx);
+            const tab = this._tabs.splice(curIdx, 1)[0];
+            this._tabs.splice(newIdx, 0, tab);
+        }
+    }
+
+    _indexOfActor(a) { return this.get_children().indexOf(a); }
+
+    _makeLabelText(win, app) {
+        if (app) return app.get_name() || win.get_title() || 'Untitled';
+        const c = win.get_wm_class();
+        return c ? c.replace(/[-_.]+/g, ' ').replace(/\b\w/g, m => m.toUpperCase())
+                 : win.get_title() || 'Untitled';
+    }
+
+    _buildTabActor(txt, app) {
+        const tab = new St.Button({ style_class: 'zone-tab', reactive: true });
+        const box = new St.BoxLayout({ vertical: false });
+        tab.set_child(box);
+
+        if (app?.get_icon())
+            box.add_child(new St.Icon({ gicon: app.get_icon(), icon_size: 16, style_class: 'zone-tab-app-icon' }));
+
+        const fs  = this._settingsMgr.getTabFontSize();
+        const lbl = new St.Label({ text: txt, y_align: Clutter.ActorAlign.CENTER });
+        lbl.set_style(`font-size:${fs}px; margin-left:5px;`);
+        box.add_child(lbl);
+
+        return tab;
     }
 
     destroy() {
-        tbLog(this._zoneId, "Destroying TabBar...");
-        this._tabs.forEach(({ window, actor, unmanagingSignalId, labelText }) => {
-            if (window && unmanagingSignalId) { // Check if window is not null
-                try {
-                    window.disconnect(unmanagingSignalId);
-                } catch (e) {
-                    // tbLog(this._zoneId, `Error disconnecting window unmanaging signal for "${labelText}" during TabBar destroy: ${e.message}`);
-                }
-            }
-            actor.destroy();
-        });
+        this._cancelDrag();
+        this._tabs.forEach(({ actor }) => actor.destroy());
         this._tabs = [];
-
-        if (this.get_parent()) {
-            this.get_parent().remove_child(this);
-        }
         super.destroy();
-        tbLog(this._zoneId, "TabBar destroyed fully.");
     }
 }
+
 
 
 
@@ -1858,7 +1887,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 .zone-tab-bar > .zone-tab {
     padding: 4px 10px;
     margin-right: 5px;
-    border-radius: 4px 4px 0 0;
+    border-radius: 10px 10px 0 0;
     background-color: rgba(50, 50, 50, 0.8);
     color: #ffffff;
     font-size: 13px;
@@ -1875,6 +1904,9 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
     background-color: rgba(78, 154, 249, 0.8);
     color: #000000;
 }
+
+.zone-tab.dragging { opacity: 0.65; }
+.zone-tab { margin-right: 6px; }
 
 
 

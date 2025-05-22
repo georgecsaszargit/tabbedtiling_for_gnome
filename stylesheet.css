@@ -1,39 +1,62 @@
-/* Add this for the highlighter */
-.zone-highlight {
-    background-color: rgba(78, 154, 249, 0.2); /* A semi-transparent blue */
-    border: 2px solid rgba(78, 154, 249, 0.6);
-    border-radius: 6px;
-    /* transition: opacity 100ms ease-out, all 50ms ease-out; */ /* Optional: for smoother transitions */
-}
-
 /* stylesheet.css */
 
 .zone-tab-bar {
     background-color: rgba(0, 0, 0, 0.15);
     border-bottom: 1px solid rgba(0, 0, 0, 0.3);
-    height: 32px;
+    height: 32px; /* Or make it flexible */
     transition: opacity 200ms ease-out;
     z-index: 999;
+    /* No padding here if you want tabs to go truly edge-to-edge of the bar's background */
+    /* Or, if you have padding, _updateTabLayout must account for it */
+    /* padding-left: 2px; */
+    /* padding-right: 2px; */
 }
 
-.zone-tab-bar > .zone-tab {
-    padding: 4px 10px;
-    margin-right: 5px;
-    border-radius: 10px 10px 0 0;
+.zone-tab { /* Applied to St.Button */
     background-color: rgba(50, 50, 50, 0.8);
     color: #ffffff;
-    font-size: 13px;
-    min-height: 24px;
-    line-height: 24px;
+    border-radius: 10px 10px 0 0; /* Subtle rounding */
+    /* No margin, spacing is 0 in BoxLayout */
+    /* Padding is for internal content */
+    padding: 0px 5px; /* Minimal horizontal padding for content */
+    min-height: 24px; /* Ensure it fills height */
+    border: 1px solid rgba(20,20,20,0.5); /* Subtle border for separation */
+    border-bottom-width: 0;
 }
 
-.zone-tab-bar > .zone-tab:hover {
+.zone-tab:hover {
     background-color: rgba(78, 154, 249, 0.6);
-    cursor: pointer;
 }
 
-.zone-tab.active {
+.zone-tab:active, .zone-tab:focus { /* For keyboard focus */
+    background-color: rgba(78, 154, 249, 0.7);
+}
+
+.zone-tab:checked, /* If using PopupMenu.PopupSwitchMenuItem or similar active state */
+.zone-tab.active { /* Custom pseudo-class for active tab */
     background-color: rgba(78, 154, 249, 0.8);
     color: #000000;
+    /* border-color: rgba(78, 154, 249, 1); */
 }
 
+.zone-tab-content { /* Applied to internal BoxLayout in the tab */
+    /* Spacing between icon and label if needed */
+    spacing: 4px; 
+}
+
+.zone-tab-app-icon {
+    /* Icon styling if needed */
+}
+
+.zone-tab-drag-slot {
+    background-color: rgba(120, 120, 120, 0.3); /* Visible slot placeholder */
+    border: 1px dashed rgba(200, 200, 200, 0.5);
+    border-radius: 3px 3px 0 0;
+}
+
+/* Highlighter style remains the same */
+.zone-highlight {
+    background-color: rgba(78, 154, 249, 0.2);
+    border: 2px solid rgba(78, 154, 249, 0.6);
+    border-radius: 6px;
+}
