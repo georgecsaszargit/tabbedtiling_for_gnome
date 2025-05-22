@@ -10,8 +10,10 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const DRAG_THRESHOLD = 10;
 const HOLD_TIMEOUT = 250;
-const TAB_MIN_WIDTH = 60;
+const TAB_MIN_WIDTH = 80;
 const TAB_MAX_WIDTH = 180;
+const TAB_INTERNAL_NON_LABEL_WIDTH = 50;
+
 
 export class TabBar extends St.BoxLayout {
     static { GObject.registerClass(this); }
@@ -23,11 +25,10 @@ export class TabBar extends St.BoxLayout {
             x_expand: true,
             reactive: true,
         });
-        // SET YOUR DESIRED GAP HERE:
-        this.spacing = 5; // Example: 5px gap. Change this to your desired value.
+        this.spacing = 5; // Default spacing, user can change this
 
         this._zoneId = zoneId;
-        this._onTabClicked = onTabClicked;
+        this._onTabClicked = onTabClicked; // This is for activating the main tab
         this._settingsMgr = settingsMgr;
         this._tabsData = [];
 
@@ -66,12 +67,11 @@ export class TabBar extends St.BoxLayout {
         }
 
         const allocation = currentAllocationBox || this.get_allocation_box();
-        let contentAreaWidth = allocation.x2 - allocation.x1; // Start with full allocated width
+        let contentAreaWidth = allocation.x2 - allocation.x1;
         
-        // CRITICAL FIX: Account for the TabBar's own padding.
         const themeNode = this.get_theme_node();
         if (themeNode) {
-            contentAreaWidth -= themeNode.get_horizontal_padding(); // Subtracts left+right padding
+            contentAreaWidth -= themeNode.get_horizontal_padding();
         }
         
         const totalSpacingWidth = (numChildren > 1) ? (numChildren - 1) * this.spacing : 0;
@@ -99,8 +99,7 @@ export class TabBar extends St.BoxLayout {
 
             const tabData = this._tabsData.find(td => td.actor === child);
             if (tabData && tabData.labelActor) {
-                 const internalNonLabelWidth = 25; 
-                 let labelMaxWidth = currentTabWidth - internalNonLabelWidth;
+                 let labelMaxWidth = currentTabWidth - TAB_INTERNAL_NON_LABEL_WIDTH;
                  if (labelMaxWidth < 0) labelMaxWidth = 0;
                  tabData.labelActor.set_style(`max-width: ${labelMaxWidth}px`);
             }
@@ -110,11 +109,13 @@ export class TabBar extends St.BoxLayout {
     addWindow(win) {
         if (this._tabsData.some(td => td.window === win)) {
             this.highlightWindow(win);
+            // Optionally, also activate the window if adding an existing tab's window again
+            // this._onTabClicked(win); 
             return;
         }
 
         const app = this._windowTracker.get_window_app(win);
-        const { actor, labelActor } = this._buildTabActor(win, app);
+        const { actor, labelActor } = this._buildTabActor(win, app); 
 
         this._initPointerHandlers(actor, win);
 
@@ -124,10 +125,20 @@ export class TabBar extends St.BoxLayout {
 
         if (!this.visible) this.visible = true;
         
-        this.highlightWindow(win);
+        // When a new window/tab is added, make it active
+        this._onTabClicked(win); // This will highlight and activate the window
+        // this.highlightWindow(win); // _onTabClicked should handle highlighting via WindowManager's _activateWindow
+        if (actor.can_focus) actor.grab_key_focus();
+
+
         this._needsLayoutUpdate = true;
         this.queue_relayout();
     }
+
+    _onTabCloseRequested(window) {
+        window.delete(global.get_current_time());
+    }
+
 
     removeWindow(win) {
         const idx = this._tabsData.findIndex(td => td.window === win);
@@ -155,6 +166,9 @@ export class TabBar extends St.BoxLayout {
         if (this._tabsData.length === 0) {
             this.visible = false;
         }
+        // TODO: If the removed window was active, activate the next/previous one?
+        // This logic might be better handled in WindowManager after a window is removed.
+
         this._needsLayoutUpdate = true;
         this.queue_relayout();
     }
@@ -200,6 +214,21 @@ export class TabBar extends St.BoxLayout {
         labelActor.x_expand = true; 
         box.add_child(labelActor);
         
+        const closeButton = new St.Button({
+            style_class: 'zone-tab-close-button',
+            can_focus: true,
+            reactive: true,
+        });
+        closeButton.set_child(new St.Icon({
+            icon_name: 'window-close-symbolic',
+            icon_size: 18, 
+        }));
+        closeButton.connect('clicked', () => {
+            this._onTabCloseRequested(win);
+            return Clutter.EVENT_STOP;
+        });
+        box.add_child(closeButton);
+        
         actor._tabWindow = win;
 
         return { actor, labelActor };
@@ -216,6 +245,11 @@ export class TabBar extends St.BoxLayout {
         actor._pressTimeoutId    = 0;
 
         actor.connect('button-press-event', (a, event) => {
+            const source = event.get_source();
+            if (source && typeof source.has_style_class_name === 'function' && source.has_style_class_name('zone-tab-close-button')) {
+                return Clutter.EVENT_PROPAGATE;
+            }
+
             if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
             actor.grab_key_focus();
 
@@ -253,6 +287,10 @@ export class TabBar extends St.BoxLayout {
         });
 
         actor.connect('button-release-event', (a, event) => {
+            const source = event.get_source();
+            if (source && typeof source.has_style_class_name === 'function' && source.has_style_class_name('zone-tab-close-button')) {
+                return Clutter.EVENT_PROPAGATE;
+            }
             if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
             
             const wasPressPending = !!actor._pressTimeoutId;
@@ -261,10 +299,12 @@ export class TabBar extends St.BoxLayout {
                 actor._pressTimeoutId = 0;
             }
             
+            // A click occurs if the press was pending (timeout didn't fire to start a drag)
+            // AND a drag operation isn't currently in progress (which would have cleared the timeout).
             const clickOccurred = wasPressPending && (!this._dragInfo || !this._dragInfo.isDragging);
             
             if (clickOccurred) {
-                this._onTabClicked(win);
+                this._onTabClicked(win); // This is the main tab activation click
             }
             actor._pressEventDetails = null;
             return Clutter.EVENT_STOP;
@@ -406,10 +446,11 @@ export class TabBar extends St.BoxLayout {
             finalInsertionIndex = this.get_children().indexOf(slotActor);
         } else if (slotActor) {
              console.warn("TabBar: Slot actor not parented correctly at drag release.");
-             finalInsertionIndex = this._dragInfo.originalIndex;
-        } else {
-            finalInsertionIndex = this._dragInfo.originalIndex;
+             finalInsertionIndex = this._dragInfo.originalIndex; // Fallback to original index
+        } else { // Should not happen if drag started correctly
+            finalInsertionIndex = this._dragInfo.originalIndex; // Fallback
         }
+
 
         if(slotActor) {
             if(slotActor.get_parent() === this) this.remove_child(slotActor);
@@ -428,13 +469,13 @@ export class TabBar extends St.BoxLayout {
             
             const droppedWindow = draggedActor._tabWindow;
             if (droppedWindow) {
+                // Call _onTabClicked which handles window activation and highlighting via WindowManager
                 this._onTabClicked(droppedWindow); 
-                this.highlightWindow(droppedWindow);
                 if (draggedActor.can_focus) draggedActor.grab_key_focus();
             }
         }
         
-        this._dragInfo = null;
+        this._dragInfo = null; // Clear dragInfo state
         this._needsLayoutUpdate = true;
         this.queue_relayout();
         
@@ -442,6 +483,7 @@ export class TabBar extends St.BoxLayout {
     }
     
     _cancelDrag(forceCleanup = false) {
+        // Clear any pending press timeout on any tab this TabBar manages
         this._tabsData.forEach(td => {
             if (td.actor._pressTimeoutId) {
                 GLib.Source.remove(td.actor._pressTimeoutId);
@@ -449,10 +491,12 @@ export class TabBar extends St.BoxLayout {
             }
             td.actor._pressEventDetails = null;
         });
-        if (this._pressTimeoutId) {
+        // Clear any lingering global press timeout ID (though it should be actor specific now)
+        if (this._pressTimeoutId) { 
              GLib.Source.remove(this._pressTimeoutId);
              this._pressTimeoutId = 0;
         }
+
 
         if (this._dragInfo && (this._dragInfo.isDragging || forceCleanup)) {
             const { draggedActor, slotActor, originalIndex, motionId, releaseId } = this._dragInfo;
@@ -464,14 +508,16 @@ export class TabBar extends St.BoxLayout {
                  if (draggedActor.get_parent() === Main.uiGroup) {
                     Main.uiGroup.remove_child(draggedActor);
                     const isStillManaged = this._tabsData.some(td => td.actor === draggedActor);
-                    if (!forceCleanup && isStillManaged && this.get_parent()) {
+                    if (!forceCleanup && isStillManaged && this.get_parent()) { // Ensure TabBar still exists
                         const childrenCount = this.get_n_children(); 
                         const reinsertIdx = Math.min(originalIndex, childrenCount);
-                        if (draggedActor.get_parent() !== this) {
+                        // Only insert if not already a child (e.g. if removeWindow already handled it)
+                        if (draggedActor.get_parent() !== this) { 
                             this.insert_child_at_index(draggedActor, reinsertIdx);
                         }
                     } else if (!isStillManaged && !forceCleanup) {
-                        draggedActor.destroy();
+                        // If no longer managed (e.g. window closed during drag) and not a forced cleanup from TabBar destroy
+                        draggedActor.destroy(); 
                     }
                  }
                  draggedActor.set_opacity(255);
@@ -482,8 +528,9 @@ export class TabBar extends St.BoxLayout {
                 slotActor.destroy();
             }
         }
-        this._dragInfo = null;
+        this._dragInfo = null; // Crucial to reset drag state
         
+        // Only relayout if still relevant (TabBar exists and is visible or being forced)
         if (this.get_parent() && (forceCleanup || (this.visible && this.get_n_children() > 0))) {
             this._needsLayoutUpdate = true;
             this.queue_relayout();
@@ -491,18 +538,21 @@ export class TabBar extends St.BoxLayout {
     }
 
     destroy() {
-        this._cancelDrag(true); 
+        this._cancelDrag(true); // Force cleanup of any ongoing drag operations
         this._tabsData.forEach(({ unmanageId, window }) => {
             if (unmanageId && window) {
                 try {
+                    // Attempt to disconnect directly.
                     window.disconnect(unmanageId);
                 } catch (e) { 
-                    console.error(`TabBar: Error disconnecting unmanageId ${unmanageId} during destroy: ${e}`);
+                    // Log error but don't let it stop destruction
+                    console.error(`TabBar: Error disconnecting unmanageId ${unmanageId} for window during destroy: ${e}`);
                 }
             }
         });
         this._tabsData = [];
         
+        // Ensure actor-specific timeouts are cleared
         this.get_children().forEach(actor => {
             if (actor._pressTimeoutId) {
                 GLib.Source.remove(actor._pressTimeoutId);
@@ -510,11 +560,12 @@ export class TabBar extends St.BoxLayout {
             }
              actor._pressEventDetails = null;
         });
+        // Clear any lingering global press timeout ID (though it should be actor specific now)
         if (this._pressTimeoutId) {
             GLib.Source.remove(this._pressTimeoutId);
             this._pressTimeoutId = 0;
         }
 
-        super.destroy();
+        super.destroy(); // This will destroy all child actors of the TabBar
     }
 }

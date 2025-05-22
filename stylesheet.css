@@ -1,62 +1,90 @@
-/* stylesheet.css */
+/* stylesheet.css for Auto Zoner Extension */
 
-.zone-tab-bar {
-    background-color: rgba(0, 0, 0, 0.15);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.3);
-    height: 32px; /* Or make it flexible */
-    transition: opacity 200ms ease-out;
-    z-index: 999;
-    /* No padding here if you want tabs to go truly edge-to-edge of the bar's background */
-    /* Or, if you have padding, _updateTabLayout must account for it */
-    /* padding-left: 2px; */
-    /* padding-right: 2px; */
+/* Zone Highlighter */
+.zone-highlight {
+    background-color: rgba(78, 154, 249, 0.2); /* A semi-transparent blue */
+    border: 2px solid rgba(78, 154, 249, 0.6);
+    border-radius: 6px;
 }
 
-.zone-tab { /* Applied to St.Button */
-    background-color: rgba(50, 50, 50, 0.8);
-    color: #ffffff;
-    border-radius: 10px 10px 0 0; /* Subtle rounding */
-    /* No margin, spacing is 0 in BoxLayout */
-    /* Padding is for internal content */
-    padding: 0px 5px; /* Minimal horizontal padding for content */
-    min-height: 24px; /* Ensure it fills height */
-    border: 1px solid rgba(20,20,20,0.5); /* Subtle border for separation */
-    border-bottom-width: 0;
+/* Main Tab Bar Container */
+.zone-tab-bar {
+    background-color: rgba(0, 0, 0, 0.15); /* Dark semi-transparent background */
+    border-bottom: 1px solid rgba(0, 0, 0, 0.3); /* Subtle bottom border */
+    height: 32px; /* Adjust as needed, or make it flexible with min-height */
+    transition: opacity 200ms ease-out;
+    z-index: 999; /* Ensure it's above tiled windows but below shell popups */
+    /* Padding for the bar itself, if any.
+       If you add padding here, TabBar.js's _updateTabLayout accounts for it. */
+    /* padding-left: 3px; */
+    /* padding-right: 3px; */
+}
+
+/* Individual Tab (St.Button) */
+.zone-tab {
+    background-color: rgba(50, 50, 50, 0.8); /* Darker tab background */
+    color: #ffffff; /* White text */
+    border-radius: 10px 10px 0 0; /* Rounded top corners */
+    /* No margin, spacing is controlled by TabBar's 'spacing' property in JS */
+    padding: 2px 6px; /* Padding around the tab's internal content box */
+    min-height: 24px; /* Minimum height for the tab button */
+    border: 1px solid rgba(20,20,20,0.5); /* Subtle border around each tab */
+    border-bottom-width: 0; /* No bottom border for the tab itself, bar has one */
 }
 
 .zone-tab:hover {
-    background-color: rgba(78, 154, 249, 0.6);
+    background-color: rgba(70, 70, 70, 0.9); /* Slightly lighter on hover */
 }
 
-.zone-tab:active, .zone-tab:focus { /* For keyboard focus */
-    background-color: rgba(78, 154, 249, 0.7);
+.zone-tab:active, /* When button is pressed */
+.zone-tab:focus,  /* When tab has keyboard focus */
+.zone-tab.active { /* Custom pseudo-class for the currently active/highlighted tab */
+    background-color: rgba(78, 154, 249, 0.7); /* Highlight color for active tab */
+    color: #ffffff; /* Text color for active tab, could be darker if bg is light */
 }
 
-.zone-tab:checked, /* If using PopupMenu.PopupSwitchMenuItem or similar active state */
-.zone-tab.active { /* Custom pseudo-class for active tab */
-    background-color: rgba(78, 154, 249, 0.8);
-    color: #000000;
-    /* border-color: rgba(78, 154, 249, 1); */
+/* Content Box within each Tab (St.BoxLayout holding icon, label, close button) */
+.zone-tab-content {
+    spacing: 5px; /* Spacing between elements inside the tab (icon, label, close button) */
 }
 
-.zone-tab-content { /* Applied to internal BoxLayout in the tab */
-    /* Spacing between icon and label if needed */
-    spacing: 4px; 
-}
-
+/* App Icon within Tab */
 .zone-tab-app-icon {
     /* Icon styling if needed */
 }
 
-.zone-tab-drag-slot {
-    background-color: rgba(120, 120, 120, 0.3); /* Visible slot placeholder */
-    border: 1px dashed rgba(200, 200, 200, 0.5);
-    border-radius: 3px 3px 0 0;
+/* Close Button within Tab */
+.zone-tab-close-button {
+    padding: 2px; /* Padding inside the close button */
+    margin-left: 4px; /* Space between label and close button, if needed on top of content spacing */
+    border-radius: 100%; /* Make it round */
+    background-color: transparent; /* No background by default */
+    color: #aeaeae; /* Default icon color for close button - light grey */
+    border: none;
+    box-shadow: none;
+    min-width: 0; /* Allow it to be small, sized by its icon + padding */
+    min-height: 0;
+    transition: background-color 150ms ease-out, color 150ms ease-out;
 }
 
-/* Highlighter style remains the same */
-.zone-highlight {
-    background-color: rgba(78, 154, 249, 0.2);
-    border: 2px solid rgba(78, 154, 249, 0.6);
-    border-radius: 6px;
+.zone-tab-close-button StIcon { /* Target the St.Icon specifically inside the close button */
+    /* icon-size: 1em; */ /* REMOVED - icon_size set in JS is more direct and reliable */
+}
+
+
+.zone-tab-close-button:hover {
+    background-color: rgba(255, 255, 255, 0.15); /* Subtle background on hover */
+    color: #ffffff; /* Brighter icon on hover */
+}
+
+.zone-tab-close-button:active {
+    background-color: rgba(255, 255, 255, 0.25); /* Slightly more pronounced on click */
+    color: #ffffff;
+}
+
+/* Styling for the visual slot placeholder during drag and drop */
+.zone-tab-drag-slot {
+    background-color: rgba(120, 120, 120, 0.2); /* Semi-transparent placeholder */
+    border: 1px dashed rgba(200, 200, 200, 0.4);
+    border-radius: 10px 10px 0 0; /* Match tab's top rounding */
 }
