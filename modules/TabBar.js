@@ -1,43 +1,42 @@
 // modules/TabBar.js
-
-import St from 'gi://St';
-import GObject from 'gi://GObject';
-import Clutter from 'gi://Clutter';
-import Shell from 'gi://Shell';
-import GLib from 'gi://GLib';
-import Pango from 'gi://Pango';
+import St        from 'gi://St';
+import GObject   from 'gi://GObject';
+import Clutter   from 'gi://Clutter';
+import Shell     from 'gi://Shell';
+import GLib      from 'gi://GLib';
+import Pango     from 'gi://Pango';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const DRAG_THRESHOLD = 10;
-const HOLD_TIMEOUT = 250;
-const TAB_MIN_WIDTH = 80;
-const TAB_MAX_WIDTH = 180;
-const TAB_INTERNAL_NON_LABEL_WIDTH = 50;
-
+const DRAG_THRESHOLD                  = 10;
+const HOLD_TIMEOUT                    = 250;
+const TAB_MIN_WIDTH                   = 80;
+const TAB_MAX_WIDTH                   = 180;
+const TAB_INTERNAL_NON_LABEL_WIDTH    = 50;
+const TAB_GAP_PX                      = 20;   // gap between tabs
 
 export class TabBar extends St.BoxLayout {
     static { GObject.registerClass(this); }
 
     constructor(zoneId, onTabClicked, settingsMgr) {
         super({
-            style_class: 'zone-tab-bar',
-            vertical: false,
-            x_expand: true,
-            reactive: true,
+            style_class : 'zone-tab-bar',
+            vertical    : false,
+            x_expand    : true,
+            reactive    : true,
         });
-        this.spacing = 5; // Default spacing, user can change this
 
-        this._zoneId = zoneId;
-        this._onTabClicked = onTabClicked; // This is for activating the main tab
-        this._settingsMgr = settingsMgr;
-        this._tabsData = [];
+        this._gapSpacing       = TAB_GAP_PX;
+        this._zoneId           = zoneId;
+        this._onTabClicked     = onTabClicked;
+        this._settingsMgr      = settingsMgr;
+        this._tabsData         = [];
 
-        this.visible = false;
-        this._windowTracker = Shell.WindowTracker.get_default();
+        this.visible           = false;
+        this._windowTracker    = Shell.WindowTracker.get_default();
 
-        this._pressTimeoutId = 0;
-        this._dragInfo = null;
-        this._needsLayoutUpdate = true;
+        this._pressTimeoutId   = 0;
+        this._dragInfo         = null;
+        this._needsLayoutUpdate= true;
 
         this.connect('style-changed', () => {
             this._needsLayoutUpdate = true;
@@ -45,7 +44,9 @@ export class TabBar extends St.BoxLayout {
         });
     }
 
-    vfunc_allocate(box, flags) {
+    /* --- WARNING FIX: only forward the allocation box --- */
+    vfunc_allocate(box /*, flags*/) {
+        /* GNOME 45+: super expects *one* arg */
         super.vfunc_allocate(box);
 
         if (this._needsLayoutUpdate || (this.visible && this.get_n_children() > 0)) {
@@ -55,57 +56,50 @@ export class TabBar extends St.BoxLayout {
     }
 
     _updateTabLayout(currentAllocationBox) {
-        if (!this.visible) {
+        if (!this.visible)
             return;
-        }
-        
-        const children = this.get_children();
+
+        const children    = this.get_children();
         const numChildren = children.length;
-
-        if (numChildren === 0) {
+        if (numChildren === 0)
             return;
-        }
 
-        const allocation = currentAllocationBox || this.get_allocation_box();
-        let contentAreaWidth = allocation.x2 - allocation.x1;
-        
+        const allocation       = currentAllocationBox || this.get_allocation_box();
+        let   contentAreaWidth = allocation.x2 - allocation.x1;
+
         const themeNode = this.get_theme_node();
-        if (themeNode) {
+        if (themeNode)
             contentAreaWidth -= themeNode.get_horizontal_padding();
-        }
-        
-        const totalSpacingWidth = (numChildren > 1) ? (numChildren - 1) * this.spacing : 0;
-        let widthAvailableForTabs = contentAreaWidth - totalSpacingWidth;
 
-        if (widthAvailableForTabs <= 0) { 
-            widthAvailableForTabs = numChildren * TAB_MIN_WIDTH;
-        }
+        const totalGapWidth = (numChildren > 1) ? (numChildren - 1) * this._gapSpacing : 0;
+        let   widthForTabs  = contentAreaWidth - totalGapWidth;
+        if (widthForTabs <= 0)
+            widthForTabs = numChildren * TAB_MIN_WIDTH;
 
-        let tabWidth = Math.floor(widthAvailableForTabs / numChildren);
-        tabWidth = Math.max(TAB_MIN_WIDTH, Math.min(tabWidth, TAB_MAX_WIDTH));
+        let tabWidth = Math.floor(widthForTabs / numChildren);
+        tabWidth     = Math.max(TAB_MIN_WIDTH, Math.min(tabWidth, TAB_MAX_WIDTH));
 
-        let remainder = widthAvailableForTabs - (tabWidth * numChildren);
-        if (remainder < 0) remainder = 0; 
+        let remainder = widthForTabs - (tabWidth * numChildren);
+        if (remainder < 0) remainder = 0;
 
         for (let i = 0; i < numChildren; i++) {
             const child = children[i];
-            let currentTabWidth = tabWidth;
-            if (remainder > 0) {
-                currentTabWidth++;
-                remainder--;
-            }
-            currentTabWidth = Math.max(TAB_MIN_WIDTH, Math.min(currentTabWidth, TAB_MAX_WIDTH));
-            child.set_width(currentTabWidth);
+
+            let currentWidth = tabWidth;
+            if (remainder > 0) { currentWidth++; remainder--; }
+            currentWidth = Math.max(TAB_MIN_WIDTH, Math.min(currentWidth, TAB_MAX_WIDTH));
+
+            child.set_width(currentWidth);
+            child.set_style(`margin-left: ${i === 0 ? 0 : this._gapSpacing}px;`);
 
             const tabData = this._tabsData.find(td => td.actor === child);
             if (tabData && tabData.labelActor) {
-                 let labelMaxWidth = currentTabWidth - TAB_INTERNAL_NON_LABEL_WIDTH;
-                 if (labelMaxWidth < 0) labelMaxWidth = 0;
-                 tabData.labelActor.set_style(`max-width: ${labelMaxWidth}px`);
+                const labelMax = currentWidth - TAB_INTERNAL_NON_LABEL_WIDTH;
+                tabData.labelActor.set_style(`max-width: ${Math.max(0, labelMax)}px`);
             }
         }
     }
-
+    
     addWindow(win) {
         if (this._tabsData.some(td => td.window === win)) {
             this.highlightWindow(win);
