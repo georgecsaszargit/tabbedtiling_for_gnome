@@ -8,24 +8,23 @@ import Gdk from 'gi://Gdk';
 import { ExtensionPreferences, gettext as _ } from
         'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-const ZONE_SETTINGS_KEY = 'zones';
-const ENABLE_ZONING_KEY = 'enable-auto-zoning';
-const RESTORE_ON_UNTILE_KEY = 'restore-original-size-on-untile';
-const TILE_NEW_WINDOWS_KEY = 'tile-new-windows';
-const HIGHLIGHT_ON_HOVER_KEY = 'highlight-on-hover';
-const CYCLE_ACCELERATOR_KEY = 'cycle-zone-windows-accelerator';
-const CYCLE_BACKWARD_ACCELERATOR_KEY = 'cycle-zone-windows-backward-accelerator';
-const TAB_BAR_HEIGHT_KEY = 'tab-bar-height';
-const TAB_FONT_SIZE_KEY = 'tab-font-size';
-const ZONE_GAP_SIZE_KEY = 'zone-gap-size';
-
-// New Tab Bar Adjustment Keys
-const TAB_ICON_SIZE_KEY = 'tab-icon-size';
-const TAB_CORNER_RADIUS_KEY = 'tab-corner-radius';
-const TAB_CLOSE_BUTTON_ICON_SIZE_KEY = 'tab-close-button-icon-size';
-const TAB_SPACING_KEY = 'tab-spacing';
-const TAB_MIN_WIDTH_KEY = 'tab-min-width';
-const TAB_MAX_WIDTH_KEY = 'tab-max-width';
+const ZONE_SETTINGS_KEY                     = 'zones';
+const ENABLE_ZONING_KEY                     = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY                 = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY                  = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY                = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator';
+const TAB_BAR_HEIGHT_KEY                    = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                     = 'tab-font-size';
+const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size';
+const TAB_ICON_SIZE_KEY                     = 'tab-icon-size';
+const TAB_CORNER_RADIUS_KEY                 = 'tab-corner-radius';
+const TAB_CLOSE_BUTTON_ICON_SIZE_KEY        = 'tab-close-button-icon-size';
+const TAB_SPACING_KEY                       = 'tab-spacing';
+const TAB_MIN_WIDTH_KEY                     = 'tab-min-width';
+const TAB_MAX_WIDTH_KEY                     = 'tab-max-width';
+const SNAP_EVASION_KEY                      = 'snap-evasion-key';
 
 
 const log = msg => console.log(`[AutoZonerPrefs] ${msg}`);
@@ -94,7 +93,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         this._window = window;
 
         const display = Gdk.Display.get_default();
-        const monitorCount = display.get_monitors().get_n_items();
+        const monitorCount = display?.get_monitors().get_n_items() || 1; // Fallback to 1 monitor if display is null
         const page = new Adw.PreferencesPage();
         window.add(page);
 
@@ -102,6 +101,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         const generalGroup = new Adw.PreferencesGroup({ title: _('General Settings') });
         page.add(generalGroup);
 
+        // Enable Auto Zoning
         const enableSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
         this._settings.bind(ENABLE_ZONING_KEY, enableSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
         const enableRow = new Adw.ActionRow({
@@ -111,7 +111,66 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         });
         enableRow.add_suffix(enableSwitch);
         generalGroup.add(enableRow);
+        
+        // Snap Evasion Key
+        const evasionKeyChoices = [
+            { value: 'disabled', label: _('Disabled') },
+            { value: 'control',  label: _('Control') },
+            { value: 'alt',      label: _('Alt') },
+            { value: 'shift',    label: _('Shift') },
+            { value: 'super',    label: _('Super (Windows/Cmd)') }
+        ];
+        const evasionKeyModel = new Gtk.StringList();
+        evasionKeyChoices.forEach(choice => evasionKeyModel.append(choice.label));
 
+        const evasionKeyRow = new Adw.ComboRow({
+            title: _('Snap Evasion Key'),
+            subtitle: _('Hold this key while dragging to prevent snapping'),
+            model: evasionKeyModel,
+        });
+
+        // Map stored GSettings value to ComboRow index and vice-versa
+        const currentEvasionKey = this._settings.get_string(SNAP_EVASION_KEY);
+        let currentEvasionKeyIndex = evasionKeyChoices.findIndex(c => c.value === currentEvasionKey);
+        if (currentEvasionKeyIndex === -1) currentEvasionKeyIndex = 0; // Default to 'disabled' if unknown
+        evasionKeyRow.selected = currentEvasionKeyIndex;
+
+        evasionKeyRow.connect('notify::selected', () => {
+            const selectedIndex = evasionKeyRow.selected;
+            if (selectedIndex >= 0 && selectedIndex < evasionKeyChoices.length) {
+                this._settings.set_string(SNAP_EVASION_KEY, evasionKeyChoices[selectedIndex].value);
+            }
+        });
+        // Also update ComboRow if GSetting changes externally (e.g. dconf)
+        // However, direct binding to GSettings key of type 's' with enum/choices defined in schema
+        // might work more directly if Adw.ComboRow supports it.
+        // For now, manual sync is safer or use a custom binding.
+        // A simpler direct binding for string enums (if supported directly by Adw.ComboRow binding):
+        // this._settings.bind(SNAP_EVASION_KEY, evasionKeyRow, 'selected-item.string', Gio.SettingsBindFlags.DEFAULT);
+        // For now, using manual connection. The `choices` in gschema will enforce valid values.
+        // We need to bind to a property that accepts string values from the GSetting.
+        // Let's use a simpler binding approach if `Adw.ComboRow` selected can be directly mapped.
+        // The issue is binding the string value directly.
+        // Adw.PreferencesRow.bind_property_full could be used for more complex bindings.
+
+        // Let's stick to the manual connection for clarity for now.
+        // To reflect external changes in the UI:
+        const evasionKeySettingChangedId = this._settings.connect(`changed::${SNAP_EVASION_KEY}`, () => {
+            const updatedKey = this._settings.get_string(SNAP_EVASION_KEY);
+            let updatedIndex = evasionKeyChoices.findIndex(c => c.value === updatedKey);
+            if (updatedIndex === -1) updatedIndex = 0;
+            if (evasionKeyRow.selected !== updatedIndex) {
+                evasionKeyRow.selected = updatedIndex;
+            }
+        });
+        // Make sure to disconnect this signal when the window is destroyed.
+        // Typically, ExtensionPreferences handles this for bindings, but manual connections need manual disconnect.
+        // However, `fillPreferencesWindow` is called once, so this signal lives with the prefs window.
+
+        generalGroup.add(evasionKeyRow);
+
+
+        // Highlight on Hover
         const hoverSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
         this._settings.bind(HIGHLIGHT_ON_HOVER_KEY, hoverSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
         const hoverRow = new Adw.ActionRow({
@@ -122,6 +181,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         hoverRow.add_suffix(hoverSwitch);
         generalGroup.add(hoverRow);
 
+        // Restore Original Size on Untile
         const restoreSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
         this._settings.bind(RESTORE_ON_UNTILE_KEY, restoreSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
         const restoreRow = new Adw.ActionRow({
@@ -132,6 +192,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         restoreRow.add_suffix(restoreSwitch);
         generalGroup.add(restoreRow);
 
+        // Tile New Windows
         const tileSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
         this._settings.bind(TILE_NEW_WINDOWS_KEY, tileSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
         const tileRow = new Adw.ActionRow({
@@ -142,98 +203,101 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         tileRow.add_suffix(tileSwitch);
         generalGroup.add(tileRow);
 
+        // Cycle Zone Windows Shortcut (forward)
         const accelEntry = new Gtk.Entry({
             hexpand: true,
             placeholder_text: '<Control><Alt>8'
         });
         const existing = this._settings.get_strv(CYCLE_ACCELERATOR_KEY);
         accelEntry.set_text(existing[0] || '');
-        accelEntry.connect('activate', () => {
+        accelEntry.connect('changed', () => { // Use 'changed' for live update, 'activate' for Enter
             const text = accelEntry.get_text().trim();
-            if (text) {
-                this._settings.set_strv(CYCLE_ACCELERATOR_KEY, [text]);
-                log(`Saved cycle shortcut: ${text}`);
+            // Basic validation or use Gtk.ShortcutsShortcut for better accel input
+            if (text) { // Could add Gtk.accelerator_valid(text, null) if desired
+                this._settings.set_strv(CYCLE_ACCELERATOR_KEY, [ text ]);
+                log(`Set cycle shortcut: ${text}`);
+            } else { // Clear if empty
+                this._settings.set_strv(CYCLE_ACCELERATOR_KEY, []);
             }
         });
         const accelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Shortcut'),
-            subtitle: _('Type accelerator (e.g. <Control><Alt>8) then Enter'),
-            activatable_widget: accelEntry
+            subtitle: _('E.g. <Control><Alt>8 or <Super>grave'),
         });
         accelRow.add_suffix(accelEntry);
+        accelRow.activatable_widget = accelEntry;
         generalGroup.add(accelRow);
 
+        // Cycle Zone Windows Backward Shortcut
         const backwardAccelEntry = new Gtk.Entry({
             hexpand: true,
             placeholder_text: '<Control><Alt>9'
         });
         const existingBackward = this._settings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY);
         backwardAccelEntry.set_text(existingBackward[0] || '');
-        backwardAccelEntry.connect('activate', () => {
+        backwardAccelEntry.connect('changed', () => {
             const text = backwardAccelEntry.get_text().trim();
             if (text) {
-                this._settings.set_strv(CYCLE_BACKWARD_ACCELERATOR_KEY, [text]);
-                log(`Saved backward cycle shortcut: ${text}`);
+                this._settings.set_strv(CYCLE_BACKWARD_ACCELERATOR_KEY, [ text ]);
+                log(`Set backward cycle shortcut: ${text}`);
+            } else {
+                this._settings.set_strv(CYCLE_BACKWARD_ACCELERATOR_KEY, []);
             }
         });
         const backwardAccelRow = new Adw.ActionRow({
             title: _('Cycle Zone Windows Backward Shortcut'),
-            subtitle: _('Type accelerator (e.g. <Control><Alt>9) then Enter'),
-            activatable_widget: backwardAccelEntry
+            subtitle: _('E.g. <Control><Shift><Alt>9 or <Super><Shift>grave'),
         });
         backwardAccelRow.add_suffix(backwardAccelEntry);
+        backwardAccelRow.activatable_widget = backwardAccelEntry;
         generalGroup.add(backwardAccelRow);
+        
+        // Tab Bar Adjustments Group
+        const tabBarGroup = new Adw.PreferencesGroup({ title: _('Tab Bar Adjustments') });
+        page.add(tabBarGroup);
 
+        // Tab Bar Height
         const heightSpin = Gtk.SpinButton.new_with_range(16, 200, 1);
-        heightSpin.set_value(this._settings.get_int(TAB_BAR_HEIGHT_KEY));
-        heightSpin.connect('value-changed', () => {
-            this._settings.set_int(TAB_BAR_HEIGHT_KEY, heightSpin.get_value_as_int());
-        });
+        this._settings.bind(TAB_BAR_HEIGHT_KEY, heightSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
         const heightRow = new Adw.ActionRow({
             title: _('Tab Bar Height (px)'),
             subtitle: _('Height in pixels for the tab bar'),
             activatable_widget: heightSpin
         });
         heightRow.add_suffix(heightSpin);
-        generalGroup.add(heightRow);
+        tabBarGroup.add(heightRow); // Corrected group
 
-        const fontSpin = Gtk.SpinButton.new_with_range(6, 72, 1); // Already existed
-        fontSpin.set_value(this._settings.get_int(TAB_FONT_SIZE_KEY));
-        fontSpin.connect('value-changed', () => {
-            this._settings.set_int(TAB_FONT_SIZE_KEY, fontSpin.get_value_as_int());
-        });
+        // Tab Font Size
+        const fontSpin = Gtk.SpinButton.new_with_range(6, 72, 1);
+        this._settings.bind(TAB_FONT_SIZE_KEY, fontSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
         const fontRow = new Adw.ActionRow({
-            title: _('Tab Font Size (px)'), // Already existed
+            title: _('Tab Font Size (px)'),
             subtitle: _('Font size in pixels for the tab labels'),
             activatable_widget: fontSpin
         });
         fontRow.add_suffix(fontSpin);
-        generalGroup.add(fontRow);
+        tabBarGroup.add(fontRow); // Corrected group
 
+        // Zone Gap Size
         const gapSpin = Gtk.SpinButton.new_with_range(0, 50, 1);
-        gapSpin.set_value(this._settings.get_int(ZONE_GAP_SIZE_KEY));
-        gapSpin.connect('value-changed', () => {
-            this._settings.set_int(ZONE_GAP_SIZE_KEY, gapSpin.get_value_as_int());
-        });
+        this._settings.bind(ZONE_GAP_SIZE_KEY, gapSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
         const gapRow = new Adw.ActionRow({
             title: _('Zone Gap Size (px)'),
             subtitle: _('Gap around zones. 0 for no gaps. Re-snap windows to apply.'),
             activatable_widget: gapSpin
         });
         gapRow.add_suffix(gapSpin);
-        generalGroup.add(gapRow);
+        tabBarGroup.add(gapRow); // Corrected group (This was general, moving to tab if makes sense, or keep in general)
+                                // User asked for "Tab Bar Adjustments" section. Zone Gap is not strictly tab bar. Let's keep it in General for now or create "Appearance".
+                                // Re-reading original request, "Tab Bar Adjustments" was for tab-specific things.
+                                // Let's put Zone Gap back in General or a new "Layout/Appearance" Group if more such items appear.
+                                // For now, moving it from Tab Bar group, as it affects zones, not just tabs.
+        generalGroup.add(gapRow); // Moved back to general settings.
 
-
-        // Tab Bar Adjustments Group (New)
-        const tabBarGroup = new Adw.PreferencesGroup({ title: _('Tab Bar Adjustments') });
-        page.add(tabBarGroup);
 
         // Tab Icon Size
         const tabIconSizeSpin = Gtk.SpinButton.new_with_range(8, 64, 1);
-        tabIconSizeSpin.set_value(this._settings.get_int(TAB_ICON_SIZE_KEY));
-        tabIconSizeSpin.connect('value-changed', () => {
-            this._settings.set_int(TAB_ICON_SIZE_KEY, tabIconSizeSpin.get_value_as_int());
-        });
+        this._settings.bind(TAB_ICON_SIZE_KEY, tabIconSizeSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
         const tabIconSizeRow = new Adw.ActionRow({
             title: _('Tab Icon Size (px)'),
             subtitle: _('Size for application icons in tabs'),
@@ -244,10 +308,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 
         // Tab Corner Radius
         const tabCornerRadiusSpin = Gtk.SpinButton.new_with_range(0, 20, 1);
-        tabCornerRadiusSpin.set_value(this._settings.get_int(TAB_CORNER_RADIUS_KEY));
-        tabCornerRadiusSpin.connect('value-changed', () => {
-            this._settings.set_int(TAB_CORNER_RADIUS_KEY, tabCornerRadiusSpin.get_value_as_int());
-        });
+        this._settings.bind(TAB_CORNER_RADIUS_KEY, tabCornerRadiusSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
         const tabCornerRadiusRow = new Adw.ActionRow({
             title: _('Tab Corner Radius (px)'),
             subtitle: _('Radius for the top corners of tabs'),
@@ -258,10 +319,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 
         // Tab Close Button Icon Size
         const tabCloseButtonIconSizeSpin = Gtk.SpinButton.new_with_range(8, 32, 1);
-        tabCloseButtonIconSizeSpin.set_value(this._settings.get_int(TAB_CLOSE_BUTTON_ICON_SIZE_KEY));
-        tabCloseButtonIconSizeSpin.connect('value-changed', () => {
-            this._settings.set_int(TAB_CLOSE_BUTTON_ICON_SIZE_KEY, tabCloseButtonIconSizeSpin.get_value_as_int());
-        });
+        this._settings.bind(TAB_CLOSE_BUTTON_ICON_SIZE_KEY, tabCloseButtonIconSizeSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
         const tabCloseButtonIconSizeRow = new Adw.ActionRow({
             title: _('Tab Close Button Icon Size (px)'),
             subtitle: _('Size for the close icon in tabs'),
@@ -272,10 +330,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 
         // Tab Spacing
         const tabSpacingSpin = Gtk.SpinButton.new_with_range(0, 50, 1);
-        tabSpacingSpin.set_value(this._settings.get_int(TAB_SPACING_KEY));
-        tabSpacingSpin.connect('value-changed', () => {
-            this._settings.set_int(TAB_SPACING_KEY, tabSpacingSpin.get_value_as_int());
-        });
+        this._settings.bind(TAB_SPACING_KEY, tabSpacingSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
         const tabSpacingRow = new Adw.ActionRow({
             title: _('Tab Spacing (px)'),
             subtitle: _('Gap between individual tabs'),
@@ -286,10 +341,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 
         // Tab Min Width
         const tabMinWidthSpin = Gtk.SpinButton.new_with_range(30, 300, 5);
-        tabMinWidthSpin.set_value(this._settings.get_int(TAB_MIN_WIDTH_KEY));
-        tabMinWidthSpin.connect('value-changed', () => {
-            this._settings.set_int(TAB_MIN_WIDTH_KEY, tabMinWidthSpin.get_value_as_int());
-        });
+        this._settings.bind(TAB_MIN_WIDTH_KEY, tabMinWidthSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
         const tabMinWidthRow = new Adw.ActionRow({
             title: _('Tab Minimum Width (px)'),
             subtitle: _('Smallest width a tab can shrink to'),
@@ -300,10 +352,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 
         // Tab Max Width
         const tabMaxWidthSpin = Gtk.SpinButton.new_with_range(50, 500, 5);
-        tabMaxWidthSpin.set_value(this._settings.get_int(TAB_MAX_WIDTH_KEY));
-        tabMaxWidthSpin.connect('value-changed', () => {
-            this._settings.set_int(TAB_MAX_WIDTH_KEY, tabMaxWidthSpin.get_value_as_int());
-        });
+        this._settings.bind(TAB_MAX_WIDTH_KEY, tabMaxWidthSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
         const tabMaxWidthRow = new Adw.ActionRow({
             title: _('Tab Maximum Width (px)'),
             subtitle: _('Largest width a tab can expand to'),
@@ -331,16 +380,39 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         addButton.connect('clicked', () => this._addZone(monitorCount));
         this._addButtonRow.set_child(addButton);
         this._zonesGroup.add(this._addButtonRow);
+
+        // Disconnect the signal when the preferences window is destroyed
+        // This assumes `window` is the main preferences window passed to `fillPreferencesWindow`
+        if (window && typeof window.connect === 'function') { // Gtk.Window
+            window.connect('close-request', () => { // Or 'destroy'
+                if (this._settings && evasionKeySettingChangedId > 0) {
+                    try {
+                        this._settings.disconnect(evasionKeySettingChangedId);
+                    } catch (e) {
+                        log(`Error disconnecting evasionKeySettingChangedId: ${e}`);
+                    }
+                }
+            });
+        } else if (window && typeof window.get_settings === 'function' && window.get_settings() === this._settings) {
+             // If 'window' is the ExtensionPreferences object itself, it doesn't have a 'destroy' to connect to directly for this signal.
+             // The signal will live as long as this._settings object, which is usually fine for prefs.
+        }
     }
 
     _loadZonesToUI(monitorCount) {
+        // Clear previous expanders except the add button row
         let child = this._zonesGroup.get_first_child();
-        while (child) {
+        while (child && child !== this._addButtonRow) { // Check against _addButtonRow
             const next = child.get_next_sibling();
-            if (child instanceof Adw.ExpanderRow)
+            if (child instanceof Adw.ExpanderRow) { // Only remove expander rows
                 this._zonesGroup.remove(child);
+            }
             child = next;
         }
+        if (this._addButtonRow && this._addButtonRow.get_parent() === this._zonesGroup) { // Ensure add button is last
+             this._zonesGroup.remove(this._addButtonRow);
+        }
+
 
         let zones = [];
         try {
@@ -352,13 +424,18 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         }
 
         zones.forEach(zoneData => this._createAndAddZoneExpander(zoneData, monitorCount));
+        
+        // Re-add the add button row if it was defined
+        if (this._addButtonRow) {
+            this._zonesGroup.add(this._addButtonRow);
+        }
     }
 
     _createAndAddZoneExpander(zoneData, monitorCount) {
         const editorGrid = new ZoneEditorGrid(zoneData, monitorCount);
         const expanderRow = new Adw.ExpanderRow({
             title: zoneData.name || _('Unnamed Zone'),
-            subtitle: `X:${zoneData.x}, Y:${zoneData.y}, W:${zoneData.width}, H:${zoneData.height}, M:${zoneData.monitorIndex + 1}`
+            subtitle: `X:${zoneData.x}, Y:${zoneData.y}, W:${zoneData.width}, H:${zoneData.height}, M:${zoneData.monitorIndex + 1}` // Assuming 1-based for display
         });
         expanderRow.add_row(editorGrid);
 
@@ -373,15 +450,15 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 
         editorGrid.connect('changed', () => {
             const cd = editorGrid.get_zone_data();
-            expanderRow.title = cd.name || _('Unnamed Zone');
+            expanderRow.title    = cd.name || _('Unnamed Zone');
             expanderRow.subtitle = `X:${cd.x}, Y:${cd.y}, W:${cd.width}, H:${cd.height}, M:${cd.monitorIndex + 1}`;
             this._saveZones();
         });
         removeButton.connect('clicked', () => {
             const dialog = new Adw.MessageDialog({
                 heading: _("Remove Zone?"),
-                body: _("Are you sure you want to remove “%s”?").format(expanderRow.title),
-                transient_for: this._window,
+                body:    _("Are you sure you want to remove “%s”?").format(expanderRow.title),
+                transient_for: this._window.get_root(), // Get root window for dialog
                 modal: true
             });
             dialog.add_response("cancel", _("Cancel"));
@@ -396,10 +473,12 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
             });
             dialog.present();
         });
-        if (this._addButtonRow)
+
+        if (this._addButtonRow) { // Insert before the add button
             this._zonesGroup.add_before(expanderRow, this._addButtonRow);
-        else
+        } else { // Fallback if add button isn't ready (should not happen with current flow)
             this._zonesGroup.add(expanderRow);
+        }
     }
 
     _addZone(monitorCount) {
@@ -409,12 +488,12 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         } catch {}
         const idx = current.length + 1;
         const newZone = {
-            monitorIndex: 0,
-            name: _('New Zone %d').format(idx),
-            x: 0, y: 0, width: 1280, height: 720
+            monitorIndex: 0, // Default to first monitor
+            name:         _('New Zone %d').format(idx),
+            x: 0, y: 0, width: 600, height: 400 // Some default size
         };
         this._createAndAddZoneExpander(newZone, monitorCount);
-        this._saveZones();
+        this._saveZones(); // This will also re-add the button at the end
     }
 
     _saveZones() {
@@ -422,8 +501,18 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         let child = this._zonesGroup.get_first_child();
         while (child) {
             if (child instanceof Adw.ExpanderRow && child.get_n_rows() > 0) {
-                const grid = child.get_row_at_index(0);
-                zones.push(grid.get_zone_data());
+                const firstRowContent = child.get_row_at_index(0);
+                // Check if the first child of ExpanderRow is indeed our ZoneEditorGrid
+                if (firstRowContent instanceof ZoneEditorGrid) {
+                    zones.push(firstRowContent.get_zone_data());
+                } else if (firstRowContent instanceof Adw.ActionRow && firstRowContent.get_child() instanceof ZoneEditorGrid) {
+                    // Sometimes the grid might be wrapped in an ActionRow by AdwExpanderRow implicitly or due to other structures.
+                     zones.push(firstRowContent.get_child().get_zone_data());
+                } else {
+                    // If ZoneEditorGrid is nested differently, adjust this logic or ensure ZoneEditorGrid is always the direct row.
+                    // For Adw.ExpanderRow.add_row(widget), widget becomes the row.
+                    log('Warning: Could not find ZoneEditorGrid in ExpanderRow to save zone data.');
+                }
             }
             child = child.get_next_sibling();
         }

@@ -31,6 +31,23 @@ export class WindowManager {
         this._tabBars = {};
     }
 
+    _getEvasionKeyMask() {
+        const keyName = this._settingsManager.getSnapEvasionKeyName();
+        switch (keyName?.toLowerCase()) {
+            case 'control':
+                return Clutter.ModifierType.CONTROL_MASK;
+            case 'alt':
+                return Clutter.ModifierType.MOD1_MASK;
+            case 'shift':
+                return Clutter.ModifierType.SHIFT_MASK;
+            case 'super':
+                return Clutter.ModifierType.MOD4_MASK;
+            case 'disabled':
+            default:
+                return 0; 
+        }
+    }
+
     connectSignals() {
         this._disconnectSignals();
         if (!this._settingsManager.isZoningEnabled()) {
@@ -82,20 +99,19 @@ export class WindowManager {
         const isMouseMoving = (op & Meta.GrabOp.MOVING) !== 0;
         const isKeyboardMoving = (op & Meta.GrabOp.KEYBOARD_MOVING) !== 0;
 
+        const evasionKeyMask = this._getEvasionKeyMask();
         const [, , mods] = global.get_pointer();
-        const isCtrlHeld = (mods & Clutter.ModifierType.CONTROL_MASK) !== 0;
+        const isEvasionKeyHeld = evasionKeyMask !== 0 && (mods & evasionKeyMask) !== 0;
 
-        // Always clear bypass flag at the beginning of a new grab
-        delete window._autoZonerCtrlBypass;
+        delete window._autoZonerEvasionBypass; 
 
-        if (isCtrlHeld) {
-            window._autoZonerCtrlBypass = true;
-            log('_onGrabOpBegin', `Ctrl key is held for "${window.get_title()}", bypassing highlights and original rect store for this drag.`);
+        if (isEvasionKeyHeld) {
+            window._autoZonerEvasionBypass = true;
+            const keyName = this._settingsManager.getSnapEvasionKeyName();
+            log('_onGrabOpBegin', `${keyName} key is held for "${window.get_title()}", bypassing highlights and original rect store.`);
             this._highlightManager?.stopUpdating();
-            // Do not store original rect and do not start highlights if Ctrl is held
             return; 
         }
-        // If not CtrlHeld, _autoZonerCtrlBypass remains undefined or false from previous cleanup.
 
         if (!(isMouseMoving || isKeyboardMoving)) {
             log('_onGrabOpBegin', `Operation is not a move (op: ${op}), stopping highlights and skipping further setup.`);
@@ -106,7 +122,6 @@ export class WindowManager {
         if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
             return;
 
-        // Store original rect only if Ctrl is NOT held and other conditions met
         if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
             window._autoZonerOriginalRect = window.get_frame_rect();
             log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}" during normal move.`);
@@ -117,27 +132,24 @@ export class WindowManager {
     _onGrabOpEnd(display, window, op) {
         this._highlightManager?.stopUpdating();
 
-        const wasCtrlBypassActiveAtStart = window._autoZonerCtrlBypass; // Check flag from _onGrabOpBegin
-        delete window._autoZonerCtrlBypass; // Clean up immediately
+        const wasEvasionBypassActiveAtStart = window._autoZonerEvasionBypass;
+        delete window._autoZonerEvasionBypass;
 
+        const evasionKeyMask = this._getEvasionKeyMask();
         const [, , modsAtEnd] = global.get_pointer();
-        const isCtrlHeldAtEnd = (modsAtEnd & Clutter.ModifierType.CONTROL_MASK) !== 0;
+        const isEvasionKeyHeldAtEnd = evasionKeyMask !== 0 && (modsAtEnd & evasionKeyMask) !== 0;
 
-        if (isCtrlHeldAtEnd || wasCtrlBypassActiveAtStart) {
-            log('_onGrabOpEnd', `Ctrl key is (or was at start) held for "${window.get_title()}", bypassing snap logic. Window remains at current pos.`);
+        if (isEvasionKeyHeldAtEnd || wasEvasionBypassActiveAtStart) {
+            const keyName = this._settingsManager.getSnapEvasionKeyName();
+            log('_onGrabOpEnd', `${keyName} key is (or was at start) held for "${window.get_title()}", bypassing snap logic. Window remains at current pos.`);
             if (window._autoZonerIsZoned) {
-                // Window was zoned, now user is Ctrl-placing it. Unsnap without moving.
                 this._unsnapWindow(window, /* keepCurrentPosition = */ true);
             } else {
-                // Window was not zoned, user Ctrl-dragged it. It's already where it should be.
-                // Any _autoZonerOriginalRect from a previous state (e.g. if drag started without Ctrl)
-                // is now superseded by this manual placement.
                 delete window._autoZonerOriginalRect;
             }
-            return; // Skip all further snapping logic
+            return;
         }
 
-        // --- Normal snap/unsnap logic (Ctrl not involved) ---
         if (op === Meta.GrabOp.MOVING || op === Meta.GrabOp.KEYBOARD_MOVING) {
             log('_onGrabOpEnd', `Operation is MOVING or KEYBOARD_MOVING (op: ${op}), proceeding to normal snap logic.`);
         } else if ((op & ALL_RESIZING_OPS) !== 0) {
@@ -150,7 +162,7 @@ export class WindowManager {
 
         if (!this._settingsManager.isZoningEnabled()) return;
         if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) {
-            this._unsnapWindow(window); // Default: keepCurrentPosition = false
+            this._unsnapWindow(window); 
             return;
         }
 
@@ -171,10 +183,10 @@ export class WindowManager {
             this._snapWindowToZone(window, zoneDef, true);
             log('_onGrabOpEnd', `Snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`);
         } else {
-            this._unsnapWindow(window); // Default: keepCurrentPosition = false
+            this._unsnapWindow(window); 
         }
     }
-
+    
     _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
         let bar = this._tabBars[zoneId];
         if (!bar) {
@@ -239,18 +251,12 @@ export class WindowManager {
         if (window.get_maximized && window.get_maximized())
             window.unmaximize(Meta.MaximizeFlags.BOTH);
         
-        // Store original rect IF NOT a Ctrl-bypassed grab operation AND restore is enabled AND not already set
         if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
-            let storeRect = true;
-            if (isGrabOpContext && window._autoZonerCtrlBypass === true) { // Check if bypass was set for this grab
-                storeRect = false;
-            }
-            if(storeRect){
-                window._autoZonerOriginalRect = window.get_frame_rect();
-                log('_snapWindowToZone', `Stored original rect for "${window.get_title()}" (context: ${isGrabOpContext}, bypass: ${window._autoZonerCtrlBypass})`);
-            }
+            // This check assumes _onGrabOpBegin correctly decided not to store if evasion was active.
+            // If we reach here, it's a normal snap or a snap initiated not from a grab op where evasion matters.
+            window._autoZonerOriginalRect = window.get_frame_rect();
+            log('_snapWindowToZone', `Stored original rect for "${window.get_title()}"`);
         }
-
 
         this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
         if (!this._snappedWindows[zoneId].includes(window))
@@ -289,18 +295,16 @@ export class WindowManager {
         tabBar.set_position(tabBarX, tabBarY);
         tabBar.set_size(tabBarW, barHeight);
 
-        if (!isGrabOpContext) { // Delayed check
+        if (!isGrabOpContext) { 
             GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
                 if (window && typeof window.get_frame_rect === 'function' &&
                     window._autoZonerZoneId === zoneId && !window.is_fullscreen() &&
                     window.get_maximized() === Meta.MaximizeFlags.NONE) {
                     const currentRect = window.get_frame_rect();
-                    // Simplified re-check based on current state, full re-calc omitted for brevity
                     if (currentRect.x !== gappedWindowX || currentRect.y !== gappedWindowY ||
                         currentRect.width !== gappedWindowW || currentRect.height !== gappedWindowH) {
                         log('_snapWindowToZone[DelayedCheck]', `Window "${window.get_title()}" mismatch. Re-applying.`);
                         window.move_resize_frame(false, gappedWindowX, gappedWindowY, gappedWindowW, gappedWindowH);
-                        // Re-apply tab bar too if window moved
                         const delayedTabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
                         delayedTabBar.set_position(tabBarX, tabBarY);
                         delayedTabBar.set_size(tabBarW, barHeight);
@@ -315,26 +319,22 @@ export class WindowManager {
 
     _unsnapWindow(window, keepCurrentPosition = false) {
         const oldZoneId = window._autoZonerZoneId;
-        if (!oldZoneId && !keepCurrentPosition) { // If not zoned and not a special keepPosition call, nothing to do.
-             // If keepCurrentPosition is true, it implies a Ctrl-drag, even if window wasn't zoned.
-             // We still want to delete _autoZonerOriginalRect in that case (handled in _onGrabOpEnd).
-            return;
+        
+        // Only proceed if it was actually zoned OR if we're explicitly keeping position (e.g. Ctrl-drag of a non-zoned window needs its OriginalRect cleared)
+        if (!oldZoneId && !keepCurrentPosition) {
+            return; 
         }
         log('_unsnapWindow', `Unsnapping "${window.get_title()}" from zone "${oldZoneId || 'N/A'}". keepCurrentPosition=${keepCurrentPosition}`);
 
         if (!keepCurrentPosition && this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
             const o = window._autoZonerOriginalRect;
             window.move_resize_frame(false, o.x, o.y, o.width, o.height);
-            delete window._autoZonerOriginalRect; // Original rect has been used for this restoration.
+            delete window._autoZonerOriginalRect; 
         } else if (keepCurrentPosition) {
-            // Window stays where it is (user manually placed it with Ctrl).
-            // Any previous _autoZonerOriginalRect is now invalid as the user has defined a new "original" manual position.
             delete window._autoZonerOriginalRect;
         }
-        // If !keepCurrentPosition and restore is OFF (or no originalRect), window is not moved by this block.
-        // _autoZonerOriginalRect would persist if it existed and restore was off, which is fine.
 
-        if (oldZoneId) { // Only do zone-specific cleanup if it was actually in a zone
+        if (oldZoneId) { 
             delete window._autoZonerIsZoned;
             delete window._autoZonerZoneId;
 
@@ -355,25 +355,22 @@ export class WindowManager {
             }
         }
     }
-    
+
     cycleWindowsInCurrentZone() {
         const focus = global.display.focus_window;
         if (!focus || !focus._autoZonerZoneId) {
             log('cycle', 'No zoned window focused; aborting.');
             return;
         }
-
         const zoneId = focus._autoZonerZoneId;
         const list = this._snappedWindows[zoneId] || [];
         if (list.length < 2) {
             log('cycle', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`);
             return;
         }
-
         let idx = (this._cycleIndexByZone[zoneId] + 1) % list.length;
         this._cycleIndexByZone[zoneId] = idx;
         const nextWin = list[idx];
-
         log('cycle', `Cycling to [${idx}] "${nextWin.get_title()}" in zone "${zoneId}".`);
         this._activateWindow(zoneId, nextWin);
     }
@@ -384,18 +381,15 @@ export class WindowManager {
             log('cycle-backward', 'No zoned window focused; aborting.');
             return;
         }
-
         const zoneId = focus._autoZonerZoneId;
         const list = this._snappedWindows[zoneId] || [];
         if (list.length < 2) {
             log('cycle-backward', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`);
             return;
         }
-
         let idx = (this._cycleIndexByZone[zoneId] - 1 + list.length) % list.length;
         this._cycleIndexByZone[zoneId] = idx;
         const prevWin = list[idx];
-
         log('cycle-backward', `Cycling backward to [${idx}] "${prevWin.get_title()}" in zone "${zoneId}".`);
         this._activateWindow(zoneId, prevWin);
     }
@@ -406,10 +400,8 @@ export class WindowManager {
         if (currentWindowIndex !== -1) {
             this._cycleIndexByZone[zoneId] = currentWindowIndex;
         }
-
         const now = global.get_current_time();
         window.activate(now);
-
         this._tabBars[zoneId]?.highlightWindow(window);
     }
 
@@ -420,7 +412,7 @@ export class WindowManager {
                 delete w._autoZonerIsZoned;
                 delete w._autoZonerOriginalRect;
                 delete w._autoZonerZoneId;
-                delete w._autoZonerCtrlBypass;
+                delete w._autoZonerEvasionBypass; 
             }
         });
     }
@@ -432,7 +424,6 @@ export class WindowManager {
             if (tabBar && typeof tabBar.refreshTabVisuals === 'function') {
                 log('updateAllTabAppearances', `Refreshing visuals for tab bar: ${zoneId}`);
                 tabBar.refreshTabVisuals();
-
                 const zoneDef = this._settingsManager.getZones().find(z => (z.name || JSON.stringify(z)) === zoneId);
                 if (zoneDef) {
                     const wa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
@@ -463,6 +454,4 @@ export class WindowManager {
         this.cleanupWindowProperties();
         log('destroy', 'Destroyed.');
     }
-    
-    
 }

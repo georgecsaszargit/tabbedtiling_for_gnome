@@ -3,52 +3,55 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
-const ZONE_SETTINGS_KEY = 'zones';
-const ENABLE_ZONING_KEY = 'enable-auto-zoning';
-const RESTORE_ON_UNTILE_KEY = 'restore-original-size-on-untile';
-const TILE_NEW_WINDOWS_KEY = 'tile-new-windows';
-const HIGHLIGHT_ON_HOVER_KEY = 'highlight-on-hover';
-const CYCLE_ACCELERATOR_KEY = 'cycle-zone-windows-accelerator';
-const CYCLE_BACKWARD_ACCELERATOR_KEY = 'cycle-zone-windows-backward-accelerator';
-const TAB_BAR_HEIGHT_KEY = 'tab-bar-height';
-const TAB_FONT_SIZE_KEY = 'tab-font-size';
-const ZONE_GAP_SIZE_KEY = 'zone-gap-size';
+const ZONE_SETTINGS_KEY                     = 'zones';
+const ENABLE_ZONING_KEY                     = 'enable-auto-zoning';
+const RESTORE_ON_UNTILE_KEY                 = 'restore-original-size-on-untile';
+const TILE_NEW_WINDOWS_KEY                  = 'tile-new-windows';
+const HIGHLIGHT_ON_HOVER_KEY                = 'highlight-on-hover';
+const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator';
+const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator';
+const TAB_BAR_HEIGHT_KEY                    = 'tab-bar-height';
+const TAB_FONT_SIZE_KEY                     = 'tab-font-size';
+const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size';
+const TAB_ICON_SIZE_KEY                     = 'tab-icon-size';
+const TAB_CORNER_RADIUS_KEY                 = 'tab-corner-radius';
+const TAB_CLOSE_BUTTON_ICON_SIZE_KEY        = 'tab-close-button-icon-size';
+const TAB_SPACING_KEY                       = 'tab-spacing';
+const TAB_MIN_WIDTH_KEY                     = 'tab-min-width';
+const TAB_MAX_WIDTH_KEY                     = 'tab-max-width';
+const SNAP_EVASION_KEY                      = 'snap-evasion-key';
 
-// New Tab Bar Adjustment Keys
-const TAB_ICON_SIZE_KEY = 'tab-icon-size';
-const TAB_CORNER_RADIUS_KEY = 'tab-corner-radius';
-const TAB_CLOSE_BUTTON_ICON_SIZE_KEY = 'tab-close-button-icon-size';
-const TAB_SPACING_KEY = 'tab-spacing';
-const TAB_MIN_WIDTH_KEY = 'tab-min-width';
-const TAB_MAX_WIDTH_KEY = 'tab-max-width';
 
-const DEFAULT_ZONES_FILENAME = 'default_zones.json';
+const DEFAULT_ZONES_FILENAME                = 'default_zones.json';
 const log = (msg) => console.log(`[AutoZoner.SettingsManager] ${msg}`);
 
 export class SettingsManager {
     constructor(gsettings, extensionPath) {
-        this._gsettings = gsettings;
-        this._extensionPath = extensionPath;
-        this._zones = [];
-        this._signalHandlers = new Map();
+        this._gsettings       = gsettings;
+        this._extensionPath   = extensionPath;
+        this._zones           = [];
+        this._signalHandlers  = new Map();
 
         this._loadDefaultZonesFromFileIfNeeded();
         this._loadZonesFromGSettings();
 
         this._connectSettingChange(ZONE_SETTINGS_KEY, () => this._loadZonesFromGSettings());
+        this._connectSettingChange(ENABLE_ZONING_KEY, () => log('Enable auto zoning changed'));
+        this._connectSettingChange(RESTORE_ON_UNTILE_KEY, () => log('Restore on untile changed'));
+        this._connectSettingChange(TILE_NEW_WINDOWS_KEY, () => log('Tile new windows changed'));
+        this._connectSettingChange(HIGHLIGHT_ON_HOVER_KEY, () => log('Highlight on hover changed'));
         this._connectSettingChange(CYCLE_ACCELERATOR_KEY, () => log('Cycle accelerator changed'));
         this._connectSettingChange(CYCLE_BACKWARD_ACCELERATOR_KEY, () => log('Backward cycle accelerator changed'));
         this._connectSettingChange(TAB_BAR_HEIGHT_KEY, () => log('Tab bar height changed'));
         this._connectSettingChange(TAB_FONT_SIZE_KEY, () => log('Tab font size changed'));
         this._connectSettingChange(ZONE_GAP_SIZE_KEY, () => log('Zone gap size changed'));
-
-        // Connect listeners for new tab settings
         this._connectSettingChange(TAB_ICON_SIZE_KEY, () => log('Tab icon size changed'));
         this._connectSettingChange(TAB_CORNER_RADIUS_KEY, () => log('Tab corner radius changed'));
         this._connectSettingChange(TAB_CLOSE_BUTTON_ICON_SIZE_KEY, () => log('Tab close button icon size changed'));
         this._connectSettingChange(TAB_SPACING_KEY, () => log('Tab spacing changed'));
         this._connectSettingChange(TAB_MIN_WIDTH_KEY, () => log('Tab min width changed'));
         this._connectSettingChange(TAB_MAX_WIDTH_KEY, () => log('Tab max width changed'));
+        this._connectSettingChange(SNAP_EVASION_KEY, () => log(`Snap evasion key changed to: ${this.getSnapEvasionKeyName()}`));
     }
 
     _loadDefaultZonesFromFileIfNeeded() {
@@ -142,7 +145,6 @@ export class SettingsManager {
         return this._gsettings.get_int(ZONE_GAP_SIZE_KEY);
     }
 
-    // New getters for tab bar adjustment settings
     getTabIconSize() {
         return this._gsettings.get_int(TAB_ICON_SIZE_KEY);
     }
@@ -165,6 +167,10 @@ export class SettingsManager {
 
     getTabMaxWidth() {
         return this._gsettings.get_int(TAB_MAX_WIDTH_KEY);
+    }
+
+    getSnapEvasionKeyName() {
+        return this._gsettings.get_string(SNAP_EVASION_KEY);
     }
 
     destroy() {
