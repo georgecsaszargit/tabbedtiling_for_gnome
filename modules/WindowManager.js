@@ -3,33 +3,32 @@
 import Meta from 'gi://Meta';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
-import Mtk from 'gi://Mtk'; // For Mtk.Rectangle
+import Mtk from 'gi://Mtk';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { ZoneDetector } from './ZoneDetector.js';
-import { TabBar }       from './TabBar.js';
+import { TabBar } from './TabBar.js';
 
 const log = (context, msg) => console.log(`[AutoZoner.WindowManager.${context}] ${msg}`);
-
 const ALL_RESIZING_OPS = Meta.GrabOp.RESIZING_N | Meta.GrabOp.RESIZING_S |
-                         Meta.GrabOp.RESIZING_E | Meta.GrabOp.RESIZING_W |
-                         Meta.GrabOp.RESIZING_NW | Meta.GrabOp.RESIZING_NE |
-                         Meta.GrabOp.RESIZING_SW | Meta.GrabOp.RESIZING_SE |
-                         Meta.GrabOp.KEYBOARD_RESIZING_N | Meta.GrabOp.KEYBOARD_RESIZING_S |
-                         Meta.GrabOp.KEYBOARD_RESIZING_E | Meta.GrabOp.KEYBOARD_RESIZING_W |
-                         Meta.GrabOp.KEYBOARD_RESIZING_NW | Meta.GrabOp.KEYBOARD_RESIZING_NE |
-                         Meta.GrabOp.KEYBOARD_RESIZING_SW | Meta.GrabOp.KEYBOARD_RESIZING_SE;
+    Meta.GrabOp.RESIZING_E | Meta.GrabOp.RESIZING_W |
+    Meta.GrabOp.RESIZING_NW | Meta.GrabOp.RESIZING_NE |
+    Meta.GrabOp.RESIZING_SW | Meta.GrabOp.RESIZING_SE |
+    Meta.GrabOp.KEYBOARD_RESIZING_N | Meta.GrabOp.KEYBOARD_RESIZING_S |
+    Meta.GrabOp.KEYBOARD_RESIZING_E | Meta.GrabOp.KEYBOARD_RESIZING_W |
+    Meta.GrabOp.KEYBOARD_RESIZING_NW | Meta.GrabOp.KEYBOARD_RESIZING_NE |
+    Meta.GrabOp.KEYBOARD_RESIZING_SW | Meta.GrabOp.KEYBOARD_RESIZING_SE;
 
 export class WindowManager {
     constructor(settingsManager, highlightManager) {
-        this._settingsManager  = settingsManager;
+        this._settingsManager = settingsManager;
         this._highlightManager = highlightManager;
-        this._zoneDetector     = new ZoneDetector();
+        this._zoneDetector = new ZoneDetector();
         this._signalConnections = [];
 
-        this._snappedWindows    = {};
-        this._cycleIndexByZone  = {};
-        this._tabBars           = {};
+        this._snappedWindows = {};
+        this._cycleIndexByZone = {};
+        this._tabBars = {};
     }
 
     connectSignals() {
@@ -38,9 +37,9 @@ export class WindowManager {
             log('connectSignals', 'Zoning disabled.');
             return;
         }
-        this._connect(global.display, 'grab-op-begin',  (d, w, o) => this._onGrabOpBegin(d, w, o));
-        this._connect(global.display, 'grab-op-end',    (d, w, o) => this._onGrabOpEnd(d, w, o));
-        this._connect(global.display, 'window-created', (d, w)    => this._onWindowCreated(d, w));
+        this._connect(global.display, 'grab-op-begin', (d, w, o) => this._onGrabOpBegin(d, w, o));
+        this._connect(global.display, 'grab-op-end', (d, w, o) => this._onGrabOpEnd(d, w, o));
+        this._connect(global.display, 'window-created', (d, w) => this._onWindowCreated(d, w));
         log('connectSignals', 'Signals connected.');
     }
 
@@ -51,7 +50,7 @@ export class WindowManager {
 
     _disconnectSignals() {
         this._signalConnections.forEach(({ gobj, id }) => {
-            try { gobj.disconnect(id); } catch {}
+            try { gobj.disconnect(id); } catch { }
         });
         this._signalConnections = [];
     }
@@ -62,16 +61,14 @@ export class WindowManager {
             return;
         if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
             return;
-        // For window created, it's possible it's not fully formed yet.
-        // A short delay might be better before checking its state.
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { // Increased delay slightly
-            // Check if window is still valid (not null) before accessing properties
+
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
             if (!window || typeof window.get_frame_rect !== 'function') return GLib.SOURCE_REMOVE;
 
-            const rect   = window.get_frame_rect();
-            const center = { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
-            const mon    = window.get_monitor();
-            const zones  = this._settingsManager.getZones();
+            const rect = window.get_frame_rect();
+            const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+            const mon = window.get_monitor();
+            const zones = this._settingsManager.getZones();
             const zoneDef = this._zoneDetector.findTargetZone(zones, center, mon);
             if (zoneDef) {
                 this._snapWindowToZone(window, zoneDef, false);
@@ -93,7 +90,6 @@ export class WindowManager {
 
         if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
             return;
-
         if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
             window._autoZonerOriginalRect = window.get_frame_rect();
             log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}" during move.`);
@@ -103,7 +99,6 @@ export class WindowManager {
 
     _onGrabOpEnd(display, window, op) {
         this._highlightManager?.stopUpdating();
-
         if (op === Meta.GrabOp.MOVING || op === Meta.GrabOp.KEYBOARD_MOVING) {
             log('_onGrabOpEnd', `Operation is MOVING or KEYBOARD_MOVING (op: ${op}), proceeding to snap logic.`);
         } else if ((op & ALL_RESIZING_OPS) !== 0) {
@@ -115,7 +110,6 @@ export class WindowManager {
         }
 
         if (!this._settingsManager.isZoningEnabled()) return;
-
         if (!window || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) {
             this._unsnapWindow(window);
             return;
@@ -131,9 +125,8 @@ export class WindowManager {
         }
 
         const center = { x: pointerX, y: pointerY };
-        const zones  = this._settingsManager.getZones();
+        const zones = this._settingsManager.getZones();
         const zoneDef = this._zoneDetector.findTargetZone(zones, center, mon);
-
         if (zoneDef) {
             this._snapWindowToZone(window, zoneDef, true);
             log('_onGrabOpEnd', `Snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`);
@@ -149,13 +142,13 @@ export class WindowManager {
             this._tabBars[zoneId] = bar;
             Main.uiGroup.add_child(bar);
         }
-        const wa       = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
-        const x        = wa.x + zoneDef.x;
-        const y        = wa.y + Math.max(0, zoneDef.y);
-        const height   = this._settingsManager.getTabBarHeight();
+        const wa = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+        const x = wa.x + zoneDef.x;
+        const y = wa.y + Math.max(0, zoneDef.y); // Ensure tab bar doesn't go above work area top
+        const height = this._settingsManager.getTabBarHeight();
         bar.set_position(x, y);
-        bar.set_size(zoneDef.width, height);
-        bar.set_style(`height: ${height}px;`);
+        bar.set_size(zoneDef.width, height); // Tab bar should span the width of the zone
+        bar.set_style(`height: ${height}px;`); // Explicit height for the container
 
         return bar;
     }
@@ -169,27 +162,27 @@ export class WindowManager {
             if (!win || win.is_fullscreen() || win.get_window_type() !== Meta.WindowType.NORMAL)
                 return;
 
-            const rect   = win.get_frame_rect();
-            const center = { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
-            const mon    = win.get_monitor();
+            const rect = win.get_frame_rect();
+            const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+            const mon = win.get_monitor();
             
             let currentMonitorIndex = mon;
             if (currentMonitorIndex < 0 || currentMonitorIndex >= Main.layoutManager.monitors.length) {
                  currentMonitorIndex = Main.layoutManager.primaryIndex;
             }
-
+            
             let zoneDef = this._zoneDetector.findTargetZone(zones, center, currentMonitorIndex);
-            if (!zoneDef) {
+            if (!zoneDef) { // If window center not in a zone, try to find nearest zone on its current monitor
                 const wa = Main.layoutManager.getWorkAreaForMonitor(currentMonitorIndex);
                 let best, bestDist = Infinity;
                 zones.filter(z => z.monitorIndex === currentMonitorIndex).forEach(z => {
-                    const zx = wa.x + z.x + z.width/2;
-                    const zy = wa.y + z.y + z.height/2;
+                    const zx = wa.x + z.x + z.width / 2; // zone center x
+                    const zy = wa.y + z.y + z.height / 2; // zone center y
                     const dx = zx - center.x, dy = zy - center.y;
-                    const d2 = dx*dx + dy*dy;
+                    const d2 = dx * dx + dy * dy;
                     if (d2 < bestDist) { bestDist = d2; best = z; }
                 });
-                zoneDef = best;
+                zoneDef = best; // This might be undefined if no zones on that monitor
             }
 
             if (zoneDef)
@@ -199,11 +192,11 @@ export class WindowManager {
 
     _snapWindowToZone(window, zoneDef, isGrabOpContext = false) {
         const zoneId = zoneDef.name || JSON.stringify(zoneDef);
-
         const oldZoneId = window._autoZonerZoneId;
+
         if (oldZoneId && oldZoneId !== zoneId) {
             const oldDef = this._settingsManager.getZones()
-                                         .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
+                .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
             if (oldDef) {
                 this._getZoneTabBar(oldZoneId, oldDef.monitorIndex, oldDef)
                     .removeWindow(window);
@@ -214,21 +207,19 @@ export class WindowManager {
 
         if (window.get_maximized && window.get_maximized())
             window.unmaximize(Meta.MaximizeFlags.BOTH);
-
         if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect)
             window._autoZonerOriginalRect = window.get_frame_rect();
 
         this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
         if (!this._snappedWindows[zoneId].includes(window))
             this._snappedWindows[zoneId].push(window);
-        
         this._cycleIndexByZone[zoneId] = (this._snappedWindows[zoneId].length - 1);
         window._autoZonerIsZoned = true;
-        window._autoZonerZoneId  = zoneId;
+        window._autoZonerZoneId = zoneId;
 
-        const wa             = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
-        const barHeight      = this._settingsManager.getTabBarHeight();
-        const minWindowDim   = 50;
+        const wa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
+        const barHeight = this._settingsManager.getTabBarHeight();
+        const minWindowDim = 50; // Minimum dimension for a window
         const zoneGap = this._settingsManager.getZoneGapSize();
         let gapPosOffset = 0;
         let gapSizeReduction = 0;
@@ -238,22 +229,27 @@ export class WindowManager {
             gapSizeReduction = zoneGap;
         }
 
+        // Calculate actual zone position and dimensions within the work area
         const slotX = wa.x + zoneDef.x;
         let desiredSlotW = zoneDef.width;
+        // Ensure slot width does not exceed monitor boundary from slotX
         let maxAllowableSlotW = (wa.x + wa.width) - slotX;
         let slotW = Math.min(desiredSlotW, maxAllowableSlotW);
-        slotW = Math.max(slotW, minWindowDim);
+        slotW = Math.max(slotW, minWindowDim); // Ensure minimum width
 
-        const actualZoneYInWorkArea = zoneDef.y;
-        const clippedZoneYInWorkArea = Math.max(0, actualZoneYInWorkArea);
-        const yClippage = clippedZoneYInWorkArea - actualZoneYInWorkArea;
+        // Handle Y position and height carefully if zone.y is negative (partially off-screen top)
+        const actualZoneYInWorkArea = zoneDef.y; // zoneDef.y is relative to workArea.y
+        const clippedZoneYInWorkArea = Math.max(0, actualZoneYInWorkArea); // Clip to 0 if zone.y is negative
+        const yClippage = clippedZoneYInWorkArea - actualZoneYInWorkArea; // How much was clipped from the top
 
-        const slotContentY = wa.y + clippedZoneYInWorkArea + barHeight;
-        let desiredSlotH = zoneDef.height - yClippage - barHeight;
+        const slotContentY = wa.y + clippedZoneYInWorkArea + barHeight; // Content starts below tab bar
+        let desiredSlotH = zoneDef.height - yClippage - barHeight; // Reduce height by clipped amount and tab bar
+        // Ensure slot height does not exceed monitor boundary from slotContentY
         let maxAllowableSlotH = (wa.y + wa.height) - slotContentY;
         let slotH = Math.min(desiredSlotH, maxAllowableSlotH);
-        slotH = Math.max(slotH, minWindowDim);
+        slotH = Math.max(slotH, minWindowDim); // Ensure minimum height
 
+        // Apply gaps to the window itself, within the calculated slot
         const gappedWindowX = slotX + gapPosOffset;
         let gappedWindowW = slotW - gapSizeReduction;
         gappedWindowW = Math.max(gappedWindowW, minWindowDim);
@@ -261,26 +257,30 @@ export class WindowManager {
         const gappedWindowY = slotContentY + gapPosOffset;
         let gappedWindowH = slotH - gapSizeReduction;
         gappedWindowH = Math.max(gappedWindowH, minWindowDim);
-        
-        const tabBarX = wa.x + zoneDef.x + gapPosOffset;
-        const tabBarY = wa.y + clippedZoneYInWorkArea + gapPosOffset;
-        const tabBarW = gappedWindowW;
+
+        // Tab bar positioning: should align with the gapped window's visual area if gaps are considered part of the "zone"
+        // Or, align with the original zoneDef.x/width and let gaps be inside.
+        // Current logic places tab bar at zoneDef.x and gives it zoneDef.width.
+        // Let's adjust TabBar position to align with the gapped window for consistency if gaps are present
+        const tabBarX = wa.x + zoneDef.x + (zoneGap > 0 ? gapPosOffset : 0); // If gaps, offset tab bar start
+        const tabBarY = wa.y + clippedZoneYInWorkArea + (zoneGap > 0 ? gapPosOffset : 0); // Offset if gaps
+        const tabBarW = gappedWindowW; // Tab bar width matches gapped window width
 
         window.move_resize_frame(false, gappedWindowX, gappedWindowY, gappedWindowW, gappedWindowH);
 
-        const tabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
+        const tabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef); // zoneDef for overall size
+        // Update tab bar position and size based on new calculations
         tabBar.set_position(tabBarX, tabBarY);
-        tabBar.set_size(tabBarW, barHeight);
+        tabBar.set_size(tabBarW, barHeight); // Width matches gapped window, height from settings
 
-        if (!isGrabOpContext) {
+        if (!isGrabOpContext) { // Delayed check and re-apply, useful after initial snapping
             GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
-                // Check if window and its properties are still accessible and relevant
-                if (window && typeof window.get_frame_rect === 'function' && // Basic check for GObject validity
+                if (window && typeof window.get_frame_rect === 'function' &&
                     window._autoZonerZoneId === zoneId &&
-                    window.get_maximized() === Meta.MaximizeFlags.NONE && 
+                    window.get_maximized() === Meta.MaximizeFlags.NONE &&
                     !window.is_fullscreen()) {
-                    
-                    const currentRect = window.get_frame_rect();
+
+                    // Recalculate expected geometry for the check
                     const checkWa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
                     const checkBarHeight = this._settingsManager.getTabBarHeight();
                     const checkZoneGap = this._settingsManager.getZoneGapSize();
@@ -313,17 +313,18 @@ export class WindowManager {
                     let chkGappedWindowH = chkSlotH - chkGapSizeReduction;
                     chkGappedWindowH = Math.max(chkGappedWindowH, minWindowDim);
                     
-                    const chkTabBarX = checkWa.x + zoneDef.x + chkGapPosOffset;
-                    const chkTabBarY = checkWa.y + chk_clippedZoneYInWorkArea + chkGapPosOffset;
-                    const chkTabBarW = chkGappedWindowW;
-
+                    const currentRect = window.get_frame_rect();
                     if (currentRect.x !== chkGappedWindowX || currentRect.y !== chkGappedWindowY ||
                         currentRect.width !== chkGappedWindowW || currentRect.height !== chkGappedWindowH) {
                         
                         log('_snapWindowToZone[DelayedCheck]', `Window "${window.get_title()}" position/size mismatch. Re-applying.`);
                         window.move_resize_frame(false, chkGappedWindowX, chkGappedWindowY, chkGappedWindowW, chkGappedWindowH);
                         
+                        // Also re-apply tab bar position/size if window was corrected
                         const delayedTabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
+                        const chkTabBarX = checkWa.x + zoneDef.x + (checkZoneGap > 0 ? chkGapPosOffset : 0);
+                        const chkTabBarY = checkWa.y + chk_clippedZoneYInWorkArea + (checkZoneGap > 0 ? chkGapPosOffset : 0);
+                        const chkTabBarW = chkGappedWindowW;
                         delayedTabBar.set_position(chkTabBarX, chkTabBarY);
                         delayedTabBar.set_size(chkTabBarW, checkBarHeight);
                     }
@@ -339,7 +340,6 @@ export class WindowManager {
     _unsnapWindow(window) {
         const oldZoneId = window._autoZonerZoneId;
         if (!oldZoneId) return;
-
         log('_unsnapWindow', `Unsnapping "${window.get_title()}" from zone "${oldZoneId}"`);
 
         if (this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) {
@@ -350,19 +350,17 @@ export class WindowManager {
 
         delete window._autoZonerIsZoned;
         delete window._autoZonerZoneId;
-
         const oldDef = this._settingsManager.getZones()
-                                     .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
+            .find(z => (z.name || JSON.stringify(z)) === oldZoneId);
         if (oldDef) {
             const tabBar = this._tabBars[oldZoneId];
             if (tabBar) {
-                 tabBar.removeWindow(window);
+                tabBar.removeWindow(window);
             }
         }
 
         this._snappedWindows[oldZoneId] =
             (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
-
         if (this._snappedWindows[oldZoneId] && this._snappedWindows[oldZoneId].length === 0) {
             if (this._tabBars[oldZoneId]) {
                 this._tabBars[oldZoneId].destroy();
@@ -380,7 +378,7 @@ export class WindowManager {
         }
 
         const zoneId = focus._autoZonerZoneId;
-        const list   = this._snappedWindows[zoneId] || [];
+        const list = this._snappedWindows[zoneId] || [];
         if (list.length < 2) {
             log('cycle', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`);
             return;
@@ -402,7 +400,7 @@ export class WindowManager {
         }
 
         const zoneId = focus._autoZonerZoneId;
-        const list   = this._snappedWindows[zoneId] || [];
+        const list = this._snappedWindows[zoneId] || [];
         if (list.length < 2) {
             log('cycle-backward', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`);
             return;
@@ -438,6 +436,47 @@ export class WindowManager {
                 delete w._autoZonerZoneId;
             }
         });
+    }
+
+    updateAllTabAppearances() {
+        log('updateAllTabAppearances', 'Requesting update for appearance of all tab bars.');
+        for (const zoneId in this._tabBars) {
+            const tabBar = this._tabBars[zoneId];
+            if (tabBar && typeof tabBar.refreshTabVisuals === 'function') {
+                log('updateAllTabAppearances', `Refreshing visuals for tab bar: ${zoneId}`);
+                tabBar.refreshTabVisuals();
+
+                // Also need to update the TabBar's own height and position if tab bar height changed
+                // Find the zoneDef for this tabBar to correctly reposition/resize it
+                const zoneDef = this._settingsManager.getZones().find(z => (z.name || JSON.stringify(z)) === zoneId);
+                if (zoneDef) {
+                    const wa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex);
+                    const barHeight = this._settingsManager.getTabBarHeight();
+                    const zoneGap = this._settingsManager.getZoneGapSize();
+                    const gapPosOffset = zoneGap > 0 ? Math.floor(zoneGap / 2) : 0;
+                    
+                    const clippedZoneYInWorkArea = Math.max(0, zoneDef.y);
+
+                    const tabBarX = wa.x + zoneDef.x + gapPosOffset;
+                    const tabBarY = wa.y + clippedZoneYInWorkArea + gapPosOffset;
+                    
+                    // Recalculate gapped window width for tab bar width
+                    const minWindowDim = 50;
+                    let slotW = Math.min(zoneDef.width, (wa.x + wa.width) - (wa.x + zoneDef.x));
+                    slotW = Math.max(slotW, minWindowDim);
+                    let gappedWindowW = slotW - (zoneGap > 0 ? zoneGap : 0);
+                    gappedWindowW = Math.max(gappedWindowW, minWindowDim);
+                    const tabBarW = gappedWindowW;
+
+                    tabBar.set_position(tabBarX, tabBarY);
+                    tabBar.set_size(tabBarW, barHeight);
+                    tabBar.set_style(`height: ${barHeight}px;`);
+                }
+            }
+        }
+        // After updating individual tab bars, it might be necessary to re-snap windows
+        // if tab bar height changes significantly, as it affects content area.
+        // This is now handled in extension.js by calling _performDelayedSnap as well.
     }
 
     destroy() {

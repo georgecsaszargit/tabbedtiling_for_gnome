@@ -60,5 +60,35 @@
       <summary>Zone Gap Size</summary>
       <description>Pixel size of the gap around and between window zones. Set to 0 to disable gaps. Changes may require a re-snap of windows.</description>
     </key>
-  </schema>
+
+    <key name="tab-icon-size" type="i">
+      <default>24</default> <summary>Tab Icon Size</summary>
+      <description>Size in pixels for the application icon in tabs.</description>
+    </key>
+
+    <key name="tab-corner-radius" type="i">
+      <default>4</default> <summary>Tab Corner Radius</summary>
+      <description>Corner radius in pixels for individual tabs. Affects the top corners.</description>
+    </key>
+
+    <key name="tab-close-button-icon-size" type="i">
+      <default>18</default> <summary>Tab Close Button Icon Size</summary>
+      <description>Size in pixels for the close button icon within tabs.</description>
+    </key>
+
+    <key name="tab-spacing" type="i">
+      <default>20</default> <summary>Tab Spacing</summary>
+      <description>Gap in pixels between individual tabs in the tab bar.</description>
+    </key>
+
+    <key name="tab-min-width" type="i">
+      <default>80</default> <summary>Tab Minimum Width</summary>
+      <description>Minimum width in pixels for an individual tab.</description>
+    </key>
+
+    <key name="tab-max-width" type="i">
+      <default>180</default> <summary>Tab Maximum Width</summary>
+      <description>Maximum width in pixels for an individual tab.</description>
+    </key>
+    </schema>
 </schemalist>

@@ -11,7 +11,7 @@
 .zone-tab-bar {
     background-color: rgba(0, 0, 0, 0.15);
     border-bottom: 1px solid rgba(0, 0, 0, 0.3);
-    height: 32px;
+    height: 32px; /* This can be seen as a fallback or default if not overridden by JS/Settings */
     transition: opacity 200ms ease-out;
     z-index: 999;
 }
@@ -20,7 +20,7 @@
 .zone-tab {
     background-color: rgba(50, 50, 50, 0.8);
     color: #ffffff;
-    border-radius: 4px 4px 0 0;
+    border-radius: 4px 4px 0 0; /* Fallback, overridden by inline style from TabBar.js for corners */
     padding: 2px 6px;
     min-height: 24px;
     border: 1px solid rgba(20,20,20,0.5);
@@ -40,20 +40,19 @@
 
 /* Content Box within each Tab (St.BoxLayout holding icon, label, close button) */
 .zone-tab-content {
-    spacing: 5px;
+    spacing: 5px; /* This is a default, tab spacing is now a setting affecting margins */
 }
 
 /* App Icon within Tab */
 .zone-tab-app-icon {
-    /* Icon styling if needed */
+    /* Icon styling if needed, size is set in JS */
 }
 
 /* Close Button within Tab */
 .zone-tab-close-button {
     padding: 2px;
     margin-left: 4px;
-    border-radius: 12px; /* MODIFIED: Was 100%, now a fixed px value for roundness */
-                         /* Adjust this based on button size if it's not perfectly round */
+    border-radius: 12px;
     background-color: transparent;
     color: #aeaeae;
     border: none;
@@ -82,5 +81,5 @@
 .zone-tab-drag-slot {
     background-color: rgba(120, 120, 120, 0.2);
     border: 1px dashed rgba(200, 200, 200, 0.4);
-    border-radius: 4px 4px 0 0;
+    border-radius: 4px 4px 0 0; /* Should match tab corner radius ideally */
 }
