@@ -132,105 +132,107 @@ export class TabBar extends St.BoxLayout {
         if (this._destroyed) return false; 
         return this._tabsData.some(td => td.window === win); 
     }
-
+    
     _updateTabLayout(currentAllocationBox) {
-        if (this._destroyed || !this.visible) return; 
-        
+        if (this._destroyed || !this.visible) return;
         const themeNode = this.get_theme_node();
         const allocation = currentAllocationBox || this.get_allocation_box();
         if (!allocation || allocation.get_width() === 0 || !themeNode) return;
 
-        const actualTabs = this.get_children().filter(c => 
-            c !== this._splitButton && 
-            c.style_class !== 'zone-tab-drag-slot' && 
-            c.visible
-        );
-        const numActualTabs = actualTabs.length;
-
-        const layoutChildren = this.get_children().filter(c => 
-            c !== this._splitButton && 
+        // Children that will flow normally (tabs and drag slot)
+        const flowChildren = this.get_children().filter(c =>
+            c !== this._splitButton && // Exclude split button from this flow
             (c.visible || c.style_class === 'zone-tab-drag-slot')
         );
-        const numLayoutChildren = layoutChildren.length;
+        const numFlowChildren = flowChildren.length;
 
-        if (numLayoutChildren === 0 && (!this._splitButton || !this._splitButton.visible)) {
-            return;
+        if (numFlowChildren === 0 && (!this._splitButton || !this._splitButton.visible)) {
+            return; // Nothing to lay out
         }
         
-        const tabMinWidth = this._settingsMgr.getTabMinWidth(); 
-        const tabMaxWidth = this._settingsMgr.getTabMaxWidth(); 
-        const gapSpacing = this._settingsMgr.getTabSpacing(); 
-        const tabCornerRadius = this._settingsMgr.getTabCornerRadius(); 
+        const tabMinWidth = this._settingsMgr.getTabMinWidth();
+        const tabMaxWidth = this._settingsMgr.getTabMaxWidth();
+        const gapSpacing = this._settingsMgr.getTabSpacing(); // Fetches the configured gap size
+        const tabCornerRadius = this._settingsMgr.getTabCornerRadius();
 
-        let contentAreaWidth = allocation.get_width() - themeNode.get_horizontal_padding();
+        // Calculate width available for flowChildren content and their CSS margins
+        let availableWidth = allocation.get_width() - themeNode.get_horizontal_padding();
         
-        let splitButtonActualWidth = 0;
+        let splitButtonReservation = 0;
         if (this._splitButton && this._splitButton.visible) {
-            splitButtonActualWidth = this._splitButton.get_preferred_width(-1)[1];
-            // Add spacing only if there are tabs or other elements to the left of the button
-            if (numLayoutChildren > 0) {
-                 splitButtonActualWidth += gapSpacing;
+            splitButtonReservation = this._splitButton.get_preferred_width(-1)[1];
+            if (numFlowChildren > 0) { // If there are tabs, also reserve space for one gap before the button
+                splitButtonReservation += gapSpacing;
             }
+        }
+        availableWidth -= splitButtonReservation;
+        
+        // Calculate the total width that will be consumed by margins between flowChildren
+        let totalMarginWidth = 0;
+        if (numFlowChildren > 1) {
+            totalMarginWidth = (numFlowChildren - 1) * gapSpacing;
         }
         
-        let widthForTabs = contentAreaWidth - splitButtonActualWidth;
-        const totalGapWidthForTabs = (numActualTabs > 1) ? (numActualTabs - 1) * gapSpacing : 0;
-        // This gap is between tabs, not between last tab and button (that's handled by splitButtonActualWidth's gap)
-        widthForTabs -= totalGapWidthForTabs;
+        // This is the width purely for the content of the flowChildren themselves
+        let netWidthForFlowChildrenContent = availableWidth - totalMarginWidth;
 
-
-        if (widthForTabs <= 0 && numActualTabs > 0) {
-            widthForTabs = numActualTabs * tabMinWidth;
-        } else if (widthForTabs <=0 && numLayoutChildren > 0 && numActualTabs === 0) {
-             widthForTabs = numLayoutChildren * tabMinWidth;
+        if (netWidthForFlowChildrenContent <= 0 && numFlowChildren > 0) {
+            // Fallback if calculated space is too small (e.g. due to large gaps and many tabs)
+            netWidthForFlowChildrenContent = numFlowChildren * tabMinWidth;
         }
 
-
-        let tabWidth = tabMinWidth;
-        if (numActualTabs > 0) {
-            tabWidth = Math.floor(widthForTabs / numActualTabs);
-        } else if (numLayoutChildren > 0) { 
-            tabWidth = Math.floor(widthForTabs / numLayoutChildren);
+        let childBaseWidth = tabMinWidth;
+        if (numFlowChildren > 0) {
+            childBaseWidth = Math.floor(netWidthForFlowChildrenContent / numFlowChildren);
         }
-        tabWidth = Math.max(tabMinWidth, Math.min(tabWidth, tabMaxWidth));
+        // Ensure base width is within defined min/max
+        childBaseWidth = Math.max(tabMinWidth, Math.min(childBaseWidth, tabMaxWidth));
 
-        let remainder = 0;
-        if (numActualTabs > 0) {
-            remainder = (widthForTabs - (tabWidth * numActualTabs));
-            if (remainder < 0) remainder = 0;
+        let remainderWidth = 0;
+        if (numFlowChildren > 0) {
+            remainderWidth = netWidthForFlowChildrenContent - (childBaseWidth * numFlowChildren);
+            if (remainderWidth < 0) remainderWidth = 0;
         }
 
-        let currentX = themeNode.get_padding(St.Side.LEFT);
-        for (let i = 0; i < layoutChildren.length; i++) {
-            const child = layoutChildren[i];
-            
-            let currentActualWidth = tabWidth;
-             if (child.style_class !== 'zone-tab-drag-slot' && remainder > 0) { 
-                currentActualWidth++;
-                remainder--;
+        for (let i = 0; i < flowChildren.length; i++) {
+            const child = flowChildren[i];
+            let currentChildActualWidth = childBaseWidth;
+
+            if (remainderWidth > 0) { // Distribute any remaining width
+                currentChildActualWidth++;
+                remainderWidth--;
             }
-            currentActualWidth = Math.max(tabMinWidth, Math.min(currentActualWidth, tabMaxWidth));
+            // Final check on width (should already be constrained but good for safety)
+            currentChildActualWidth = Math.max(tabMinWidth, Math.min(currentChildActualWidth, tabMaxWidth));
 
-            child.set_width(currentActualWidth);
-            child.set_style(`border-radius: ${tabCornerRadius}px ${tabCornerRadius}px 0 0;`);
-            child.set_x(currentX);
-            child.set_y(Math.floor((allocation.get_height() - child.get_height()) / 2)); // Center tabs vertically
+            child.set_width(currentChildActualWidth);
+            
+            let dynamicStyle = `border-radius: ${tabCornerRadius}px ${tabCornerRadius}px 0 0;`;
+            if (i > 0) { // Add margin-left for children after the first to create spacing
+                dynamicStyle += ` margin-left: ${gapSpacing}px;`;
+            }
+            child.set_style(dynamicStyle);
+            
+            // We are NOT using child.set_x() here for flowChildren.
+            // St.BoxLayout will use the margin-left and its own packing logic.
+            // We still vertically center them.
+            child.set_y(Math.floor((allocation.get_height() - child.get_height()) / 2));
             
             const tabData = this._tabsData.find(td => td.actor === child);
             if (tabData && tabData.labelActor) {
-                const labelMax = currentActualWidth - TAB_INTERNAL_NON_LABEL_WIDTH;
+                const labelMax = currentChildActualWidth - TAB_INTERNAL_NON_LABEL_WIDTH; // TAB_INTERNAL_NON_LABEL_WIDTH = 50 [cite: 700]
                 tabData.labelActor.set_style(`max-width: ${Math.max(0, labelMax)}px`);
             }
-            currentX += currentActualWidth + gapSpacing;
         }
 
+        // Position the split button manually from the right, as it's not part of the flow
         if (this._splitButton && this._splitButton.visible) {
             const buttonNaturalWidth = this._splitButton.get_preferred_width(-1)[1];
-            this._splitButton.set_width(buttonNaturalWidth); 
-            // Positioned from the right edge of the tab bar allocation
+            this._splitButton.set_width(buttonNaturalWidth);
+            // Position from the right edge of the TabBar's allocation
             const buttonX = allocation.get_width() - themeNode.get_padding(St.Side.RIGHT) - buttonNaturalWidth;
-            this._splitButton.set_x(buttonX);
-            this._splitButton.set_y(Math.floor((allocation.get_height() - this._splitButton.get_height()) / 2)); 
+            this._splitButton.set_x(buttonX); // Manual X position
+            this._splitButton.set_y(Math.floor((allocation.get_height() - this._splitButton.get_height()) / 2)); // Vertical center
         }
     }
 
