@@ -2,45 +2,46 @@
 
 /* Zone Highlighter */
 .zone-highlight {
-    background-color: rgba(78, 154, 249, 0.2);
-    border: 2px solid rgba(78, 154, 249, 0.6);
-    border-radius: 6px;
+    background-color: rgba(78, 154, 249, 0.2); /* [cite: 756] */
+    border: 2px solid rgba(78, 154, 249, 0.6); /* [cite: 756] */
+    border-radius: 6px; /* [cite: 756] */
 }
 
 /* Main Tab Bar Container */
 .zone-tab-bar {
-    background-color: rgba(0, 0, 0, 0.15);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.3);
-    height: 32px; /* This can be seen as a fallback or default if not overridden by JS/Settings */
-    transition: opacity 200ms ease-out;
-    z-index: 999;
+    background-color: rgba(0, 0, 0, 0.15); /* [cite: 757] */
+    border-bottom: 1px solid rgba(0, 0, 0, 0.3); /* [cite: 757] */
+    height: 32px; /* This can be seen as a fallback or default if not overridden by JS/Settings */ /* [cite: 757] */
+    transition: opacity 200ms ease-out; /* [cite: 757] */
+    z-index: 999; /* [cite: 758] */
 }
 
 /* Individual Tab (St.Button) */
 .zone-tab {
-    background-color: rgba(50, 50, 50, 1);
-    color: #ffffff;
-    border-radius: 4px 4px 0 0; /* Fallback, overridden by inline style from TabBar.js for corners */
-    padding: 2px 6px;
-    min-height: 24px;
-    border: 1px solid rgba(20,20,20,0.5);
-    border-bottom-width: 0;
+    background-color: rgba(50, 50, 50, 1); /* [cite: 758] */
+    color: #ffffff; /* [cite: 759] */
+    border-radius: 4px 4px 0 0; /* Fallback, overridden by inline style from TabBar.js for corners */ /* [cite: 759] */
+    padding: 2px 6px; /* [cite: 759] */
+    min-height: 24px; /* [cite: 760] */
+    border: 1px solid rgba(20,20,20,0.5); /* [cite: 760] */
+    border-bottom-width: 0; /* [cite: 760] */
 }
 
 .zone-tab:hover {
-    background-color: rgba(70, 70, 70, 1);
+    background-color: rgba(70, 70, 70, 1); /* [cite: 760] */
 }
 
 .zone-tab:active,
 .zone-tab:focus,
 .zone-tab.active {
-    background-color: rgba(78, 154, 249, 1);
-    color: #ffffff;
+    background-color: rgba(78, 154, 249, 1); /* [cite: 761] */
+    color: #ffffff; /* [cite: 762] */
 }
 
 /* Content Box within each Tab (St.BoxLayout holding icon, label, close button) */
 .zone-tab-content {
-    spacing: 5px; /* This is a default, tab spacing is now a setting affecting margins */
+    spacing: 5px; /* [cite: 762] */
+    /* This is a default, tab spacing is now a setting affecting margins */ /* [cite: 763] */
 }
 
 /* App Icon within Tab */
@@ -50,16 +51,16 @@
 
 /* Close Button within Tab */
 .zone-tab-close-button {
-    padding: 2px;
-    margin-left: 4px;
-    border-radius: 12px;
-    background-color: transparent;
-    color: #aeaeae;
-    border: none;
-    box-shadow: none;
-    min-width: 0;
-    min-height: 0;
-    transition: background-color 150ms ease-out, color 150ms ease-out;
+    padding: 2px; /* [cite: 763] */
+    margin-left: 4px; /* [cite: 764] */
+    border-radius: 12px; /* [cite: 764] */
+    background-color: transparent; /* [cite: 764] */
+    color: #aeaeae; /* [cite: 764] */
+    border: none; /* [cite: 764] */
+    box-shadow: none; /* [cite: 764] */
+    min-width: 0; /* [cite: 764] */
+    min-height: 0; /* [cite: 764] */
+    transition: background-color 150ms ease-out, color 150ms ease-out; /* [cite: 765] */
 }
 
 .zone-tab-close-button StIcon {
@@ -68,18 +69,37 @@
 
 
 .zone-tab-close-button:hover {
-    background-color: rgba(255, 255, 255, 0.15);
-    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.15); /* [cite: 765] */
+    color: #ffffff; /* [cite: 766] */
 }
 
 .zone-tab-close-button:active {
-    background-color: rgba(255, 255, 255, 0.25);
-    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.25); /* [cite: 766] */
+    color: #ffffff; /* [cite: 767] */
 }
 
 /* Styling for the visual slot placeholder during drag and drop */
 .zone-tab-drag-slot {
-    background-color: rgba(120, 120, 120, 0.2);
-    border: 1px dashed rgba(200, 200, 200, 0.4);
-    border-radius: 4px 4px 0 0; /* Should match tab corner radius ideally */
+    background-color: rgba(120, 120, 120, 0.2); /* [cite: 767] */
+    border: 1px dashed rgba(200, 200, 200, 0.4); /* [cite: 768] */
+    border-radius: 4px 4px 0 0; /* [cite: 768] */
+    /* Should match tab corner radius ideally */ /* [cite: 769] */
 }
+
+/* Tab Bar Split Button */
+.zone-tab-bar-split-button {
+    padding: 3px;
+    border-radius: 4px;
+    background-color: transparent;
+    color: #aeaeae; /* Default icon color */
+    border: none;
+    box-shadow: none;
+    min-width: 24px; /* Ensure it's clickable */
+    min-height: 24px;
+}
+.zone-tab-bar-split-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+.zone-tab-bar-split-button StIcon { icon-size: 24px; }
