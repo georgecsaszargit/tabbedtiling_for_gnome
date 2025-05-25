@@ -498,6 +498,500 @@ export default class AutoZonerExtension extends Extension {
 
 
 
+===== FILE: ./preferences/ZoneEditorGrid.js =====
+// ./preferences/ZoneEditorGrid.js
+import Gtk from 'gi://Gtk'; // [cite: 512]
+import GObject from 'gi://GObject'; // [cite: 512]
+import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; // [cite: 513]
+
+export class ZoneEditorGrid extends Gtk.Grid {
+    static {
+        GObject.registerClass({ Signals: { 'changed': {} } }, this); // [cite: 531]
+    }
+
+    constructor(zoneData, monitorCount) {
+        super({ // [cite: 532]
+            column_spacing: 12, // [cite: 532]
+            row_spacing: 6, // [cite: 532]
+            margin_top: 10, // [cite: 532]
+            margin_bottom: 10, // [cite: 532]
+            margin_start: 10, // [cite: 532]
+            margin_end: 10, // [cite: 532]
+            hexpand: true, // [cite: 533]
+        });
+        this._zone = { ...zoneData }; // [cite: 533]
+        this.attach(new Gtk.Label({ label: _('Name:'), halign: Gtk.Align.END }), 0, 0, 1, 1); // [cite: 534]
+        this._nameEntry = new Gtk.Entry({ text: this._zone.name || '', hexpand: true }); // [cite: 535]
+        this._nameEntry.connect('changed', () => { // [cite: 535]
+            this._zone.name = this._nameEntry.get_text(); // [cite: 536]
+            this.emit('changed'); // [cite: 536]
+        });
+        this.attach(this._nameEntry, 1, 0, 3, 1); // [cite: 537]
+
+        this.attach(new Gtk.Label({ label: _('Monitor Index:'), halign: Gtk.Align.END }), 0, 1, 1, 1); // [cite: 537]
+        this._monitorSpin = Gtk.SpinButton.new_with_range(0, Math.max(0, monitorCount - 1), 1); // [cite: 538]
+        this._monitorSpin.set_value(this._zone.monitorIndex || 0); // [cite: 538]
+        this._monitorSpin.connect('value-changed', () => { // [cite: 539]
+            this._zone.monitorIndex = this._monitorSpin.get_value_as_int(); // [cite: 539]
+            this.emit('changed'); // [cite: 539]
+        });
+        this.attach(this._monitorSpin, 1, 1, 1, 1); // [cite: 540]
+
+        const fields = [ // [cite: 540]
+            { label: _('X:'), key: 'x' }, { label: _('Y:'), key: 'y' }, // [cite: 540]
+            { label: _('Width:'), key: 'width' }, { label: _('Height:'), key: 'height' } // [cite: 540]
+        ];
+        fields.forEach((f, i) => { // [cite: 541]
+            const row = Math.floor(i / 2) + 2; // [cite: 541]
+            const col = (i % 2) * 2; // [cite: 541]
+            this.attach(new Gtk.Label({ label: f.label, halign: Gtk.Align.END }), col, row, 1, 1); // [cite: 541]
+            const spin = Gtk.SpinButton.new_with_range(0, 10000, 10); // [cite: 541]
+            spin.set_value(this._zone[f.key] || 0); // [cite: 541]
+            spin.set_hexpand(true); // [cite: 542]
+            spin.connect('value-changed', () => { // [cite: 542]
+                this._zone[f.key] = spin.get_value_as_int(); // [cite: 542]
+                this.emit('changed'); // [cite: 542]
+            });
+            this.attach(spin, col + 1, row, 1, 1); // [cite: 542]
+        });
+    }
+
+    get_zone_data() {
+        return { ...this._zone }; // [cite: 543]
+    }
+}
+
+
+
+===== FILE: ./preferences/GeneralSettingsGroup.js =====
+// ./preferences/GeneralSettingsGroup.js
+import Adw from 'gi://Adw'; // [cite: 511]
+import Gtk from 'gi://Gtk'; // [cite: 512]
+import Gio from 'gi://Gio'; // [cite: 512]
+import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; // [cite: 513]
+
+const ENABLE_ZONING_KEY                     = 'enable-auto-zoning'; // [cite: 515]
+const RESTORE_ON_UNTILE_KEY                 = 'restore-original-size-on-untile'; // [cite: 516]
+const TILE_NEW_WINDOWS_KEY                  = 'tile-new-windows'; // [cite: 517]
+const HIGHLIGHT_ON_HOVER_KEY                = 'highlight-on-hover'; // [cite: 518]
+const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator'; // [cite: 519]
+const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator'; // [cite: 520]
+const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size'; // [cite: 523]
+const SNAP_EVASION_KEY                      = 'snap-evasion-key'; // [cite: 530]
+const log = msg => console.log(`[AutoZonerPrefs.GeneralSettings] ${msg}`); // [cite: 531]
+
+export function createGeneralSettingsGroup(settings) {
+    const group = new Adw.PreferencesGroup({ title: _('General Settings') }); // [cite: 547]
+
+    // Enable Auto Zoning
+    const enableSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER }); // [cite: 548]
+    settings.bind(ENABLE_ZONING_KEY, enableSwitch, 'active', Gio.SettingsBindFlags.DEFAULT); // [cite: 549]
+    const enableRow = new Adw.ActionRow({ // [cite: 549]
+        title: _('Enable Auto Zoning'), // [cite: 549]
+        subtitle: _('Globally enable or disable the extension'), // [cite: 549]
+        activatable_widget: enableSwitch // [cite: 549]
+    });
+    enableRow.add_suffix(enableSwitch); // [cite: 550]
+    group.add(enableRow); // [cite: 550]
+
+    // Snap Evasion Key
+    const evasionKeyChoices = [ // [cite: 550]
+        { value: 'disabled', label: _('Disabled') }, // [cite: 550]
+        { value: 'control',  label: _('Control') }, // [cite: 550]
+        { value: 'alt',      label: _('Alt') }, // [cite: 550]
+        { value: 'shift',    label: _('Shift') }, // [cite: 550]
+        { value: 'super',    label: _('Super (Windows/Cmd)') } // [cite: 551]
+    ];
+    const evasionKeyModel = new Gtk.StringList(); // [cite: 552]
+    evasionKeyChoices.forEach(choice => evasionKeyModel.append(choice.label)); // [cite: 552]
+
+    const evasionKeyRow = new Adw.ComboRow({ // [cite: 552]
+        title: _('Snap Evasion Key'), // [cite: 552]
+        subtitle: _('Hold this key while dragging to prevent snapping'), // [cite: 552]
+        model: evasionKeyModel, // [cite: 552]
+    });
+    const currentEvasionKey = settings.get_string(SNAP_EVASION_KEY); // [cite: 553]
+    let currentEvasionKeyIndex = evasionKeyChoices.findIndex(c => c.value === currentEvasionKey); // [cite: 554]
+    if (currentEvasionKeyIndex === -1) currentEvasionKeyIndex = 0; // [cite: 554]
+    evasionKeyRow.selected = currentEvasionKeyIndex; // [cite: 555]
+    evasionKeyRow.connect('notify::selected', () => { // [cite: 556]
+        const selectedIndex = evasionKeyRow.selected; // [cite: 556]
+        if (selectedIndex >= 0 && selectedIndex < evasionKeyChoices.length) { // [cite: 556]
+            settings.set_string(SNAP_EVASION_KEY, evasionKeyChoices[selectedIndex].value); // [cite: 556]
+        }
+    });
+    const evasionKeySettingChangedId = settings.connect(`changed::${SNAP_EVASION_KEY}`, () => { // [cite: 565]
+        const updatedKey = settings.get_string(SNAP_EVASION_KEY); // [cite: 565]
+        let updatedIndex = evasionKeyChoices.findIndex(c => c.value === updatedKey); // [cite: 565]
+        if (updatedIndex === -1) updatedIndex = 0; // [cite: 565]
+        if (evasionKeyRow.selected !== updatedIndex) { // [cite: 565]
+            evasionKeyRow.selected = updatedIndex; // [cite: 566]
+        }
+    });
+    // Disconnect signal handled by parent AutoZonerPrefs window closure [cite: 567, 568, 610]
+    group.add(evasionKeyRow); // [cite: 569]
+
+    // Highlight on Hover
+    const hoverSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER }); // [cite: 570]
+    settings.bind(HIGHLIGHT_ON_HOVER_KEY, hoverSwitch, 'active', Gio.SettingsBindFlags.DEFAULT); // [cite: 571]
+    const hoverRow = new Adw.ActionRow({ // [cite: 571]
+        title: _('Highlight Zone on Hover'), // [cite: 571]
+        subtitle: _('Visually highlight a zone when dragging a window over it'), // [cite: 571]
+        activatable_widget: hoverSwitch // [cite: 571]
+    });
+    hoverRow.add_suffix(hoverSwitch); // [cite: 572]
+    group.add(hoverRow); // [cite: 572]
+
+    // Restore Original Size on Untile
+    const restoreSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER }); // [cite: 572]
+    settings.bind(RESTORE_ON_UNTILE_KEY, restoreSwitch, 'active', Gio.SettingsBindFlags.DEFAULT); // [cite: 573]
+    const restoreRow = new Adw.ActionRow({ // [cite: 573]
+        title: _('Restore Original Size on Untile'), // [cite: 573]
+        subtitle: _('When a window leaves all zones, restore its original size/position'), // [cite: 573]
+        activatable_widget: restoreSwitch // [cite: 573]
+    });
+    restoreRow.add_suffix(restoreSwitch); // [cite: 574]
+    group.add(restoreRow); // [cite: 574]
+
+    // Tile New Windows
+    const tileSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER }); // [cite: 574]
+    settings.bind(TILE_NEW_WINDOWS_KEY, tileSwitch, 'active', Gio.SettingsBindFlags.DEFAULT); // [cite: 575]
+    const tileRow = new Adw.ActionRow({ // [cite: 575]
+        title: _('Tile New Windows'), // [cite: 575]
+        subtitle: _('Automatically tile newly opened windows if they fall into a zone'), // [cite: 575]
+        activatable_widget: tileSwitch // [cite: 575]
+    });
+    tileRow.add_suffix(tileSwitch); // [cite: 576]
+    group.add(tileRow); // [cite: 576]
+
+    // Cycle Zone Windows Shortcut (forward)
+    const accelEntry = new Gtk.Entry({ // [cite: 576]
+        hexpand: true, // [cite: 576]
+        placeholder_text: '<Control><Alt>8' // [cite: 576]
+    });
+    const existing = settings.get_strv(CYCLE_ACCELERATOR_KEY); // [cite: 577]
+    accelEntry.set_text(existing[0] || ''); // [cite: 577]
+    accelEntry.connect('changed', () => { // [cite: 577]
+        const text = accelEntry.get_text().trim(); // [cite: 577]
+        if (text) { // [cite: 577]
+            settings.set_strv(CYCLE_ACCELERATOR_KEY, [ text ]); // [cite: 577]
+            log(`Set cycle shortcut: ${text}`); // [cite: 578]
+        } else {
+            settings.set_strv(CYCLE_ACCELERATOR_KEY, []); // [cite: 578]
+        }
+    });
+    const accelRow = new Adw.ActionRow({ // [cite: 579]
+        title: _('Cycle Zone Windows Shortcut'), // [cite: 579]
+        subtitle: _('E.g. <Control><Alt>8 or <Super>grave'), // [cite: 579]
+    });
+    accelRow.add_suffix(accelEntry); // [cite: 580]
+    accelRow.activatable_widget = accelEntry; // [cite: 580]
+    group.add(accelRow); // [cite: 580]
+
+    // Cycle Zone Windows Backward Shortcut
+    const backwardAccelEntry = new Gtk.Entry({ // [cite: 580]
+        hexpand: true, // [cite: 580]
+        placeholder_text: '<Control><Alt>9' // [cite: 580]
+    });
+    const existingBackward = settings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY); // [cite: 581]
+    backwardAccelEntry.set_text(existingBackward[0] || ''); // [cite: 581]
+    backwardAccelEntry.connect('changed', () => { // [cite: 581]
+        const text = backwardAccelEntry.get_text().trim(); // [cite: 581]
+        if (text) { // [cite: 581]
+            settings.set_strv(CYCLE_BACKWARD_ACCELERATOR_KEY, [ text ]); // [cite: 581]
+            log(`Set backward cycle shortcut: ${text}`); // [cite: 581]
+        } else {
+            settings.set_strv(CYCLE_BACKWARD_ACCELERATOR_KEY, []); // [cite: 582]
+        }
+    });
+    const backwardAccelRow = new Adw.ActionRow({ // [cite: 583]
+        title: _('Cycle Zone Windows Backward Shortcut'), // [cite: 583]
+        subtitle: _('E.g. <Control><Shift><Alt>9 or <Super><Shift>grave'), // [cite: 583]
+    });
+    backwardAccelRow.add_suffix(backwardAccelEntry); // [cite: 584]
+    backwardAccelRow.activatable_widget = backwardAccelEntry; // [cite: 584]
+    group.add(backwardAccelRow); // [cite: 584]
+    
+    // Zone Gap Size
+    const gapSpin = Gtk.SpinButton.new_with_range(0, 50, 1); // [cite: 589]
+    settings.bind(ZONE_GAP_SIZE_KEY, gapSpin, 'value', Gio.SettingsBindFlags.DEFAULT); // [cite: 590]
+    const gapRow = new Adw.ActionRow({ // [cite: 590]
+        title: _('Zone Gap Size (px)'), // [cite: 590]
+        subtitle: _('Gap around zones. 0 for no gaps. Re-snap windows to apply.'), // [cite: 590]
+        activatable_widget: gapSpin // [cite: 590]
+    });
+    gapRow.add_suffix(gapSpin); // [cite: 591]
+    group.add(gapRow); // [cite: 595]
+
+    return { group, evasionKeySettingChangedId };
+}
+
+
+
+===== FILE: ./preferences/ZoneDefinitionsGroup.js =====
+// ./preferences/ZoneDefinitionsGroup.js
+import Adw from 'gi://Adw'; // [cite: 511]
+import Gtk from 'gi://Gtk'; // [cite: 512]
+import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; // [cite: 513]
+import { ZoneEditorGrid } from './ZoneEditorGrid.js'; // Assuming ZoneEditorGrid.js is in the same directory
+
+const ZONE_SETTINGS_KEY = 'zones'; // [cite: 514]
+const log = msg => console.log(`[AutoZonerPrefs.ZoneDefs] ${msg}`); // [cite: 531]
+
+export class ZoneDefinitionsGroup {
+    constructor(settings, monitorCount, window) {
+        this._settings = settings;
+        this._monitorCount = monitorCount;
+        this._window = window; // Reference to the main preferences window for dialogs
+
+        this.group = new Adw.PreferencesGroup({ // [cite: 608]
+            title: _('Zone Definitions'), // [cite: 608]
+            description: _('Define screen areas where windows will tile automatically.') // [cite: 608]
+        });
+
+        this._addButtonRow = new Adw.ActionRow(); // [cite: 609]
+        const addButton = new Gtk.Button({ // [cite: 609]
+            label: _('Add New Zone'), // [cite: 609]
+            halign: Gtk.Align.CENTER, // [cite: 609]
+            css_classes: ['suggested-action'] // [cite: 609]
+        });
+        addButton.connect('clicked', () => this._addZone()); // [cite: 610]
+        this._addButtonRow.set_child(addButton); // [cite: 610]
+
+        this._loadZonesToUI();
+    }
+
+    getWidget() {
+        return this.group;
+    }
+
+    _loadZonesToUI() {
+        // Clear previous expanders except the add button row
+        let child = this.group.get_first_child(); // [cite: 615]
+        while (child) { // [cite: 616]
+            const next = child.get_next_sibling(); // [cite: 616]
+            if (child !== this._addButtonRow && child instanceof Adw.ExpanderRow) { // [cite: 616, 617]
+                 this.group.remove(child); // [cite: 617]
+            }
+            child = next; // [cite: 618]
+        }
+        // Ensure add button row is removed if it exists, to re-add it at the end
+        if (this._addButtonRow.get_parent() === this.group) { // [cite: 619]
+            this.group.remove(this._addButtonRow); // [cite: 619]
+        }
+
+
+        let zones = []; // [cite: 620]
+        try {
+            zones = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)); // [cite: 621]
+            if (!Array.isArray(zones)) zones = []; // [cite: 622]
+        } catch (e) {
+            log(`Error parsing zones JSON: ${e}`); // [cite: 622]
+            zones = []; // [cite: 623]
+        }
+
+        zones.forEach(zoneData => this._createAndAddZoneExpander(zoneData)); // [cite: 623]
+        
+        this.group.add(this._addButtonRow); // Re-add the add button row [cite: 624]
+    }
+
+    _createAndAddZoneExpander(zoneData) {
+        const editorGrid = new ZoneEditorGrid(zoneData, this._monitorCount);
+        const expanderRow = new Adw.ExpanderRow({
+            title: zoneData.name || _('Unnamed Zone'),
+            subtitle: `X:${zoneData.x}, Y:${zoneData.y}, W:${zoneData.width}, H:${zoneData.height}, M:${zoneData.monitorIndex + 1}`
+        });
+        expanderRow.add_row(editorGrid);
+
+        const removeButton = new Gtk.Button({
+            icon_name: 'edit-delete-symbolic',
+            valign: Gtk.Align.CENTER,
+            tooltip_text: _("Remove this zone"),
+            css_classes: ['flat', 'circular']
+        });
+        expanderRow.add_suffix(removeButton);
+        expanderRow.set_enable_expansion(true);
+
+        editorGrid.connect('changed', () => {
+            const cd = editorGrid.get_zone_data();
+            expanderRow.title    = cd.name || _('Unnamed Zone');
+            expanderRow.subtitle = `X:${cd.x}, Y:${cd.y}, W:${cd.width}, H:${cd.height}, M:${cd.monitorIndex + 1}`;
+            this._saveZones();
+        });
+        removeButton.connect('clicked', () => {
+            const dialog = new Adw.MessageDialog({
+                heading: _("Remove Zone?"),
+                body:    _("Are you sure you want to remove “%s”?").format(expanderRow.title),
+                transient_for: this._window.get_root(),
+                modal: true
+            });
+            dialog.add_response("cancel", _("Cancel"));
+            dialog.add_response("remove", _("Remove"));
+            dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE);
+            dialog.connect("response", (d, resp) => {
+                if (resp === "remove") {
+                    this.group.remove(expanderRow);
+                    this._saveZones();
+                }
+                d.destroy(); // Make sure to destroy the dialog
+            });
+            dialog.present();
+        });
+        
+        // CORRECTED LINE:
+        // Add the new expander row. Ordering is handled by _loadZonesToUI
+        // (which removes _addButtonRow and adds it back after all zones).
+        this.group.add(expanderRow);
+    }
+
+    _addZone() {
+        let current = []; // [cite: 634]
+        try {
+            current = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)) || []; // [cite: 635]
+        } catch {} // [cite: 636]
+        const idx = current.length + 1; // [cite: 636]
+        const newZone = { // [cite: 637]
+            monitorIndex: 0, // Default to first monitor [cite: 637]
+            name:         _('New Zone %d').format(idx), // [cite: 637]
+            x: 0, y: 0, width: 600, height: 400 // Some default size [cite: 637]
+        };
+        this._createAndAddZoneExpander(newZone); // [cite: 638]
+        this._saveZones(); // [cite: 638]
+    }
+
+    _saveZones() {
+        const zones = []; // [cite: 638]
+        let child = this.group.get_first_child(); // [cite: 639]
+        while (child) { // [cite: 639]
+            if (child instanceof Adw.ExpanderRow && child.get_n_rows() > 0) { // [cite: 639]
+                const firstRowContent = child.get_row_at_index(0); // [cite: 639]
+                if (firstRowContent instanceof ZoneEditorGrid) { // [cite: 640]
+                    zones.push(firstRowContent.get_zone_data()); // [cite: 640]
+                } else {
+                    log('Warning: Could not find ZoneEditorGrid in ExpanderRow to save zone data.'); // [cite: 643]
+                }
+            }
+            child = child.get_next_sibling(); // [cite: 644]
+        }
+        this._settings.set_string(ZONE_SETTINGS_KEY, JSON.stringify(zones)); // [cite: 645]
+        log(`Saved ${zones.length} zones.`); // [cite: 645]
+    }
+}
+
+
+
+===== FILE: ./preferences/TabBarSettingsGroup.js =====
+// ./preferences/TabBarSettingsGroup.js
+import Adw from 'gi://Adw'; // [cite: 511]
+import Gtk from 'gi://Gtk'; // [cite: 512]
+import Gio from 'gi://Gio'; // [cite: 512]
+import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; // [cite: 513]
+
+const TAB_BAR_HEIGHT_KEY                    = 'tab-bar-height'; // [cite: 521]
+const TAB_FONT_SIZE_KEY                     = 'tab-font-size'; // [cite: 522]
+const TAB_ICON_SIZE_KEY                     = 'tab-icon-size'; // [cite: 524]
+const TAB_CORNER_RADIUS_KEY                 = 'tab-corner-radius'; // [cite: 525]
+const TAB_CLOSE_BUTTON_ICON_SIZE_KEY        = 'tab-close-button-icon-size'; // [cite: 526]
+const TAB_SPACING_KEY                       = 'tab-spacing'; // [cite: 527]
+const TAB_MIN_WIDTH_KEY                     = 'tab-min-width'; // [cite: 528]
+const TAB_MAX_WIDTH_KEY                     = 'tab-max-width'; // [cite: 529]
+
+export function createTabBarSettingsGroup(settings) {
+    const group = new Adw.PreferencesGroup({ title: _('Tab Bar Adjustments') }); // [cite: 584]
+
+    // Tab Bar Height
+    const heightSpin = Gtk.SpinButton.new_with_range(16, 200, 1); // [cite: 585]
+    settings.bind(TAB_BAR_HEIGHT_KEY, heightSpin, 'value', Gio.SettingsBindFlags.DEFAULT); // [cite: 586]
+    const heightRow = new Adw.ActionRow({ // [cite: 586]
+        title: _('Tab Bar Height (px)'), // [cite: 586]
+        subtitle: _('Height in pixels for the tab bar'), // [cite: 586]
+        activatable_widget: heightSpin // [cite: 586]
+    });
+    heightRow.add_suffix(heightSpin); // [cite: 587]
+    group.add(heightRow); // [cite: 587]
+
+    // Tab Font Size
+    const fontSpin = Gtk.SpinButton.new_with_range(6, 72, 1); // [cite: 587]
+    settings.bind(TAB_FONT_SIZE_KEY, fontSpin, 'value', Gio.SettingsBindFlags.DEFAULT); // [cite: 588]
+    const fontRow = new Adw.ActionRow({ // [cite: 588]
+        title: _('Tab Font Size (px)'), // [cite: 588]
+        subtitle: _('Font size in pixels for the tab labels'), // [cite: 588]
+        activatable_widget: fontSpin // [cite: 588]
+    });
+    fontRow.add_suffix(fontSpin); // [cite: 589]
+    group.add(fontRow); // [cite: 589]
+
+    // Tab Icon Size
+    const tabIconSizeSpin = Gtk.SpinButton.new_with_range(8, 64, 1); // [cite: 596]
+    settings.bind(TAB_ICON_SIZE_KEY, tabIconSizeSpin, 'value', Gio.SettingsBindFlags.DEFAULT); // [cite: 597]
+    const tabIconSizeRow = new Adw.ActionRow({ // [cite: 597]
+        title: _('Tab Icon Size (px)'), // [cite: 597]
+        subtitle: _('Size for application icons in tabs'), // [cite: 597]
+        activatable_widget: tabIconSizeSpin // [cite: 597]
+    });
+    tabIconSizeRow.add_suffix(tabIconSizeSpin); // [cite: 598]
+    group.add(tabIconSizeRow); // [cite: 598]
+
+    // Tab Corner Radius
+    const tabCornerRadiusSpin = Gtk.SpinButton.new_with_range(0, 20, 1); // [cite: 598]
+    settings.bind(TAB_CORNER_RADIUS_KEY, tabCornerRadiusSpin, 'value', Gio.SettingsBindFlags.DEFAULT); // [cite: 599]
+    const tabCornerRadiusRow = new Adw.ActionRow({ // [cite: 599]
+        title: _('Tab Corner Radius (px)'), // [cite: 599]
+        subtitle: _('Radius for the top corners of tabs'), // [cite: 599]
+        activatable_widget: tabCornerRadiusSpin // [cite: 599]
+    });
+    tabCornerRadiusRow.add_suffix(tabCornerRadiusSpin); // [cite: 600]
+    group.add(tabCornerRadiusRow); // [cite: 600]
+
+    // Tab Close Button Icon Size
+    const tabCloseButtonIconSizeSpin = Gtk.SpinButton.new_with_range(8, 32, 1); // [cite: 600]
+    settings.bind(TAB_CLOSE_BUTTON_ICON_SIZE_KEY, tabCloseButtonIconSizeSpin, 'value', Gio.SettingsBindFlags.DEFAULT); // [cite: 601]
+    const tabCloseButtonIconSizeRow = new Adw.ActionRow({ // [cite: 601]
+        title: _('Tab Close Button Icon Size (px)'), // [cite: 601]
+        subtitle: _('Size for the close icon in tabs'), // [cite: 601]
+        activatable_widget: tabCloseButtonIconSizeSpin // [cite: 601]
+    });
+    tabCloseButtonIconSizeRow.add_suffix(tabCloseButtonIconSizeSpin); // [cite: 602]
+    group.add(tabCloseButtonIconSizeRow); // [cite: 602]
+
+    // Tab Spacing
+    const tabSpacingSpin = Gtk.SpinButton.new_with_range(0, 50, 1); // [cite: 602]
+    settings.bind(TAB_SPACING_KEY, tabSpacingSpin, 'value', Gio.SettingsBindFlags.DEFAULT); // [cite: 603]
+    const tabSpacingRow = new Adw.ActionRow({ // [cite: 603]
+        title: _('Tab Spacing (px)'), // [cite: 603]
+        subtitle: _('Gap between individual tabs'), // [cite: 603]
+        activatable_widget: tabSpacingSpin // [cite: 603]
+    });
+    tabSpacingRow.add_suffix(tabSpacingSpin); // [cite: 604]
+    group.add(tabSpacingRow); // [cite: 604]
+
+    // Tab Min Width
+    const tabMinWidthSpin = Gtk.SpinButton.new_with_range(30, 300, 5); // [cite: 604]
+    settings.bind(TAB_MIN_WIDTH_KEY, tabMinWidthSpin, 'value', Gio.SettingsBindFlags.DEFAULT); // [cite: 605]
+    const tabMinWidthRow = new Adw.ActionRow({ // [cite: 605]
+        title: _('Tab Minimum Width (px)'), // [cite: 605]
+        subtitle: _('Smallest width a tab can shrink to'), // [cite: 605]
+        activatable_widget: tabMinWidthSpin // [cite: 605]
+    });
+    tabMinWidthRow.add_suffix(tabMinWidthSpin); // [cite: 606]
+    group.add(tabMinWidthRow); // [cite: 606]
+
+    // Tab Max Width
+    const tabMaxWidthSpin = Gtk.SpinButton.new_with_range(50, 500, 5); // [cite: 606]
+    settings.bind(TAB_MAX_WIDTH_KEY, tabMaxWidthSpin, 'value', Gio.SettingsBindFlags.DEFAULT); // [cite: 607]
+    const tabMaxWidthRow = new Adw.ActionRow({ // [cite: 607]
+        title: _('Tab Maximum Width (px)'), // [cite: 607]
+        subtitle: _('Largest width a tab can expand to'), // [cite: 607]
+        activatable_widget: tabMaxWidthSpin // [cite: 607]
+    });
+    tabMaxWidthRow.add_suffix(tabMaxWidthSpin); // [cite: 608]
+    group.add(tabMaxWidthRow); // [cite: 608]
+
+    return group;
+}
+
+
+
 ===== FILE: ./modules/WindowManager.js =====
 // modules/WindowManager.js
 
@@ -959,6 +1453,316 @@ export class WindowManager {
 
 
 
+===== FILE: ./modules/TabDragger.js =====
+// ./modules/TabDragger.js
+import GLib from 'gi://GLib';
+import Clutter from 'gi://Clutter';
+import St from 'gi://St';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+const DRAG_THRESHOLD = 10;
+const HOLD_TIMEOUT = 250; // Milliseconds
+
+export class TabDragger {
+    constructor(tabBar, onTabClicked) {
+        this._tabBar = tabBar;
+        this._onTabClicked = onTabClicked; // To reactivate tab after drop
+        this._dragInfo = null;
+        this._pressTimeoutId = 0;
+    }
+
+    initPointerHandlers(actor, win) {
+        actor._pressEventDetails = null;
+        // actor._pressTimeoutId = 0; // Managed by TabBar instance or dedicated Tab instance if it held this state
+
+        actor.connect('button-press-event', (a, event) => {
+            const source = event.get_source();
+            if (source && typeof source.has_style_class_name === 'function' && source.has_style_class_name('zone-tab-close-button')) {
+                return Clutter.EVENT_PROPAGATE;
+            }
+            if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+
+            actor.grab_key_focus();
+
+            if (actor._pressTimeoutId) GLib.Source.remove(actor._pressTimeoutId); // [cite: 280]
+
+            const [pressEventX, pressEventY] = event.get_coords();
+            actor._pressEventDetails = { time: event.get_time(), x: pressEventX, y: pressEventY, rawEvent: event }; // [cite: 280]
+
+            actor._pressTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HOLD_TIMEOUT, () => { // [cite: 280]
+                actor._pressTimeoutId = 0; // [cite: 280]
+                if (actor._pressEventDetails) { // [cite: 281]
+                    this._beginDrag(actor, actor._pressEventDetails.rawEvent); // [cite: 281]
+                }
+                return GLib.SOURCE_REMOVE; // [cite: 281]
+            });
+            return Clutter.EVENT_STOP; // [cite: 282]
+        });
+
+        actor.connect('motion-event', (a, event) => {
+            if ((event.get_state() & Clutter.ModifierType.BUTTON1_MASK) && actor._pressEventDetails) { // [cite: 282]
+                if (!this._dragInfo || !this._dragInfo.isDragging) { // [cite: 282]
+                    const [currentX, currentY] = event.get_coords();
+                    const { x: startX, y: startY } = actor._pressEventDetails;
+                    if (Math.abs(currentX - startX) > DRAG_THRESHOLD || Math.abs(currentY - startY) > DRAG_THRESHOLD) { // [cite: 283]
+                        if (actor._pressTimeoutId) { // [cite: 283]
+                            GLib.Source.remove(actor._pressTimeoutId); // [cite: 283]
+                            actor._pressTimeoutId = 0; // [cite: 284]
+                        }
+                        this._beginDrag(actor, actor._pressEventDetails.rawEvent); // [cite: 284]
+                    }
+                }
+            }
+            return Clutter.EVENT_PROPAGATE; // [cite: 285]
+        });
+
+        actor.connect('button-release-event', (a, event) => {
+            const source = event.get_source();
+            if (source && typeof source.has_style_class_name === 'function' && source.has_style_class_name('zone-tab-close-button')) {
+                return Clutter.EVENT_PROPAGATE;
+            }
+            if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE; // [cite: 286]
+
+            const wasPressPending = !!actor._pressTimeoutId; // [cite: 287]
+            if (actor._pressTimeoutId) { // [cite: 287]
+                GLib.Source.remove(actor._pressTimeoutId); // [cite: 287]
+                actor._pressTimeoutId = 0; // [cite: 287]
+            }
+
+            const clickOccurred = wasPressPending && (!this._dragInfo || !this._dragInfo.isDragging); // [cite: 287]
+
+            if (clickOccurred) {
+                this._onTabClicked(win); // [cite: 288]
+            }
+            actor._pressEventDetails = null; // [cite: 288]
+            // If a drag operation was completed, _onDragRelease would handle it.
+            // This primarily handles the click scenario.
+            return Clutter.EVENT_STOP; // [cite: 288]
+        });
+    }
+
+    _beginDrag(actor, pressEvent) {
+        if (this._dragInfo && this._dragInfo.isDragging) return; // [cite: 289]
+        if (!actor || actor.get_parent() !== this._tabBar) { // [cite: 290]
+            console.warn("TabDragger: _beginDrag called for an actor not in the managed TabBar or null actor.");
+            if (actor && actor._pressTimeoutId) GLib.Source.remove(actor._pressTimeoutId); // [cite: 291]
+            if (actor) actor._pressEventDetails = null; // [cite: 291]
+            return; // [cite: 291]
+        }
+
+        if (actor._pressTimeoutId) { // [cite: 292]
+            GLib.Source.remove(actor._pressTimeoutId); // [cite: 292]
+            actor._pressTimeoutId = 0; // [cite: 293]
+        }
+        actor._pressEventDetails = null; // [cite: 293]
+
+        const [pointerScreenX, pointerScreenY] = pressEvent.get_coords(); // [cite: 293]
+        const actorAllocationInTabBar = actor.get_allocation_box(); // [cite: 294]
+        const [tabBarScreenX, tabBarScreenY] = this._tabBar.get_transformed_position(); // [cite: 294]
+
+        const actorInitialScreenX = tabBarScreenX + actorAllocationInTabBar.x1; // [cite: 294]
+        const actorInitialScreenY = tabBarScreenY + actorAllocationInTabBar.y1; // [cite: 295]
+
+        const originalIndex = this._tabBar.get_children().indexOf(actor); // [cite: 295]
+
+        const actorWidth = actor.get_width(); // [cite: 295]
+        const actorHeight = actor.get_height(); // [cite: 295]
+        const slotActor = new St.Bin({ style_class: 'zone-tab-drag-slot', width: actorWidth, height: actorHeight }); // [cite: 296]
+
+        actor.set_opacity(200); // [cite: 296]
+        this._tabBar.remove_child(actor); // [cite: 296]
+        Main.uiGroup.add_child(actor); // [cite: 296]
+        actor.set_position(actorInitialScreenX, actorInitialScreenY); // [cite: 296]
+        try { // [cite: 297]
+            if (typeof actor.raise_top === 'function') { // [cite: 297]
+                actor.raise_top(); // [cite: 297]
+            } else {
+                const parent = actor.get_parent(); // [cite: 298]
+                if (parent && typeof parent.set_child_above_sibling === 'function') { // [cite: 299]
+                    parent.set_child_above_sibling(actor, null); // [cite: 299]
+                }
+            }
+        } catch (e) {
+            console.error("TabDragger: Error trying to raise actor.", e); // [cite: 300]
+        }
+
+        this._tabBar.insert_child_at_index(slotActor, originalIndex); // [cite: 301]
+        this._dragInfo = { // [cite: 302]
+            isDragging: true, // [cite: 302]
+            draggedActor: actor, // [cite: 302]
+            slotActor: slotActor, // [cite: 302]
+            originalIndex: originalIndex, // [cite: 302]
+            actorGrabOffsetX: pointerScreenX - actorInitialScreenX, // [cite: 302]
+            actorGrabOffsetY: pointerScreenY - actorInitialScreenY, // [cite: 303]
+            motionId: global.stage.connect('motion-event', this._onDragMotion.bind(this)), // [cite: 303]
+            releaseId: global.stage.connect('button-release-event', this._onDragRelease.bind(this)), // [cite: 303]
+        };
+        this._tabBar.requestLayoutUpdate(true); // [cite: 304]
+    }
+
+    _onDragMotion(stage, event) {
+        if (!this._dragInfo || !this._dragInfo.isDragging) return Clutter.EVENT_PROPAGATE; // [cite: 304]
+        const [currentPointerScreenX, currentPointerScreenY] = event.get_coords(); // [cite: 305]
+        this._dragInfo.draggedActor.set_position( // [cite: 305]
+            currentPointerScreenX - this._dragInfo.actorGrabOffsetX,
+            currentPointerScreenY - this._dragInfo.actorGrabOffsetY
+        );
+        const [tabBarScreenX, ] = this._tabBar.get_transformed_position(); // [cite: 306]
+        const pointerXInTabBar = currentPointerScreenX - tabBarScreenX; // [cite: 306]
+
+        let newSlotIndex = 0; // [cite: 306]
+        const currentChildren = this._tabBar.get_children(); // [cite: 306]
+        const currentSlotActualIndex = currentChildren.indexOf(this._dragInfo.slotActor); // [cite: 307]
+
+        if (currentSlotActualIndex === -1) { // [cite: 307]
+            console.error("TabDragger: Slot actor not found in TabBar during drag motion."); // [cite: 307]
+            this.cancelDrag(true); // [cite: 308]
+            return Clutter.EVENT_STOP; // [cite: 308]
+        }
+
+        let visualChildIndex = 0; // [cite: 308]
+        for (let i = 0; i < currentChildren.length; i++) { // [cite: 309]
+            const child = currentChildren[i]; // [cite: 309]
+            if (child === this._dragInfo.slotActor) continue; // [cite: 310]
+
+            const childAllocation = child.get_allocation_box(); // [cite: 310]
+            const childMidX = childAllocation.x1 + childAllocation.get_width() / 2; // [cite: 310]
+            if (pointerXInTabBar > childMidX) { // [cite: 311]
+                newSlotIndex = visualChildIndex + 1; // [cite: 311]
+            }
+            visualChildIndex++; // [cite: 312]
+        }
+
+        if (currentSlotActualIndex !== newSlotIndex) { // [cite: 313]
+            const tempSlot = this._dragInfo.slotActor; // [cite: 313]
+            if (tempSlot.get_parent() === this._tabBar) { // [cite: 314]
+                this._tabBar.set_child_at_index(tempSlot, newSlotIndex); // [cite: 314]
+            } else {
+                console.error("TabDragger: Slot actor lost parentage during drag motion."); // [cite: 315]
+                this.cancelDrag(true); // [cite: 316]
+                return Clutter.EVENT_STOP; // [cite: 316]
+            }
+            this._tabBar.requestLayoutUpdate(true); // [cite: 316]
+        }
+        return Clutter.EVENT_STOP; // [cite: 317]
+    }
+
+    _onDragRelease(stage, event) {
+        if (!this._dragInfo || !this._dragInfo.isDragging || event.get_button() !== 1) { // [cite: 318]
+            if (this._dragInfo) { // [cite: 318]
+                if (this._dragInfo.motionId) global.stage.disconnect(this._dragInfo.motionId); // [cite: 318]
+                if (this._dragInfo.releaseId) global.stage.disconnect(this._dragInfo.releaseId); // [cite: 319]
+            }
+            this._dragInfo = null; // [cite: 319]
+            return Clutter.EVENT_PROPAGATE; // [cite: 319]
+        }
+
+        const { draggedActor, slotActor, motionId, releaseId, originalIndex } = this._dragInfo; // [cite: 320]
+        if (motionId) global.stage.disconnect(motionId); // [cite: 320]
+        if (releaseId) global.stage.disconnect(releaseId); // [cite: 321]
+
+        let finalInsertionIndex = -1; // [cite: 321]
+        if (slotActor && slotActor.get_parent() === this._tabBar) { // [cite: 321]
+            finalInsertionIndex = this._tabBar.get_children().indexOf(slotActor); // [cite: 321]
+        } else if (slotActor) {
+            console.warn("TabDragger: Slot actor not parented correctly at drag release."); // [cite: 322]
+            finalInsertionIndex = originalIndex; // Fallback to original index [cite: 323]
+        } else {
+            finalInsertionIndex = originalIndex; // [cite: 323]
+        }
+
+        if (slotActor) { // [cite: 324]
+            if (slotActor.get_parent() === this._tabBar) this._tabBar.remove_child(slotActor); // [cite: 324]
+            slotActor.destroy(); // [cite: 325]
+        }
+
+        if (draggedActor) { // [cite: 325]
+            if (draggedActor.get_parent() === Main.uiGroup) Main.uiGroup.remove_child(draggedActor); // [cite: 325]
+            const numChildrenAfterSlotRemoval = this._tabBar.get_n_children(); // [cite: 326]
+            const insertionIndex = Math.max(0, Math.min(finalInsertionIndex, numChildrenAfterSlotRemoval)); // [cite: 326]
+
+            this._tabBar.insert_child_at_index(draggedActor, insertionIndex); // [cite: 326]
+            draggedActor.set_opacity(255); // [cite: 326]
+            draggedActor.set_translation(0, 0, 0); // [cite: 326]
+
+            const droppedWindow = draggedActor._tabWindow; // [cite: 326]
+            if (droppedWindow) { // [cite: 327]
+                this._onTabClicked(droppedWindow); // [cite: 327]
+                if (draggedActor.can_focus) draggedActor.grab_key_focus(); // [cite: 328]
+            }
+        }
+
+        this._dragInfo = null; // [cite: 328]
+        this._tabBar.requestLayoutUpdate(true); // [cite: 329]
+        return Clutter.EVENT_STOP; // [cite: 329]
+    }
+
+    cancelDrag(forceCleanup = false) {
+        // Clean up any pending press timeouts on individual tab actors
+        this._tabBar.getTabActors().forEach(actor => { // [cite: 329]
+            if (actor._pressTimeoutId) {
+                GLib.Source.remove(actor._pressTimeoutId);
+                actor._pressTimeoutId = 0;
+            }
+            actor._pressEventDetails = null;
+        });
+
+        if (this._pressTimeoutId) { // [cite: 330]
+            GLib.Source.remove(this._pressTimeoutId); // [cite: 330]
+            this._pressTimeoutId = 0; // [cite: 331]
+        }
+
+        if (this._dragInfo && (this._dragInfo.isDragging || forceCleanup)) { // [cite: 331]
+            const { draggedActor, slotActor, originalIndex, motionId, releaseId } = this._dragInfo; // [cite: 331]
+            if (motionId) global.stage.disconnect(motionId); // [cite: 332]
+            if (releaseId) global.stage.disconnect(releaseId); // [cite: 332]
+
+            if (draggedActor) { // [cite: 332]
+                if (draggedActor.get_parent() === Main.uiGroup) { // [cite: 332]
+                    Main.uiGroup.remove_child(draggedActor); // [cite: 332]
+                    // Check if tab still exists in TabBar's data model
+                    const isStillManaged = this._tabBar.hasWindow(draggedActor._tabWindow); // [cite: 333]
+                    if (!forceCleanup && isStillManaged && this._tabBar.get_parent()) { // [cite: 333]
+                        const childrenCount = this._tabBar.get_n_children(); // [cite: 333]
+                        const reinsertIdx = Math.min(originalIndex, childrenCount); // [cite: 334]
+                        if (draggedActor.get_parent() !== this._tabBar) { // [cite: 334]
+                           this._tabBar.insert_child_at_index(draggedActor, reinsertIdx); // [cite: 334]
+                        }
+                    } else if (!isStillManaged && !forceCleanup) { // If no longer managed (e.g. window closed during drag)
+                        //draggedActor.destroy(); // The TabBar's removeWindow should handle this
+                    }
+                }
+                draggedActor.set_opacity(255); // [cite: 336]
+                draggedActor.set_translation(0, 0, 0); // [cite: 337]
+            }
+            if (slotActor) { // [cite: 337]
+                if (slotActor.get_parent() === this._tabBar) this._tabBar.remove_child(slotActor); // [cite: 337]
+                slotActor.destroy(); // [cite: 338]
+            }
+        }
+        this._dragInfo = null; // [cite: 338]
+        if (this._tabBar.get_parent() && (forceCleanup || (this._tabBar.visible && this._tabBar.get_n_children() > 0))) { // [cite: 339]
+            this._tabBar.requestLayoutUpdate(true); // [cite: 339]
+        }
+    }
+
+    isDragging() {
+        return this._dragInfo && this._dragInfo.isDragging;
+    }
+
+    getDraggedActor() {
+        return this._dragInfo ? this._dragInfo.draggedActor : null;
+    }
+
+
+    destroy() {
+        this.cancelDrag(true);
+        // Any other specific cleanup for TabDragger
+    }
+}
+
+
+
 ===== FILE: ./modules/ZoneDetector.js =====
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -1016,7 +1820,7 @@ export class ZoneDetector {
 
 
 ===== FILE: ./modules/TabBar.js =====
-// modules/TabBar.js
+// ./modules/TabBar.js
 import St from 'gi://St';
 import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
@@ -1024,9 +1828,8 @@ import Shell from 'gi://Shell';
 import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import { TabDragger } from './TabDragger.js';
 
-const DRAG_THRESHOLD = 10;
-const HOLD_TIMEOUT = 250;
 const TAB_INTERNAL_NON_LABEL_WIDTH = 50;
 
 export class TabBar extends St.BoxLayout {
@@ -1039,16 +1842,19 @@ export class TabBar extends St.BoxLayout {
             x_expand: true,
             reactive: true,
         });
+        this.show_on_add = false; // <--- KEY CHANGE: Children not shown automatically on add
         this._zoneId = zoneId;
         this._onTabClicked = onTabClicked;
         this._settingsMgr = settingsMgr;
         this._tabsData = [];
         this.visible = false;
         this._windowTracker = Shell.WindowTracker.get_default();
-        this._pressTimeoutId = 0;
-        this._dragInfo = null;
+        this._tabDragger = new TabDragger(this, this._onTabClicked);
         this._needsLayoutUpdate = true;
+        this._destroyed = false;
+
         this.connect('style-changed', () => {
+            if (this._destroyed) return;
             this._needsLayoutUpdate = true;
             this.queue_relayout();
         });
@@ -1056,18 +1862,39 @@ export class TabBar extends St.BoxLayout {
 
     vfunc_allocate(box) {
         super.vfunc_allocate(box);
+        if (this._destroyed) return;
         if (this._needsLayoutUpdate || (this.visible && this.get_n_children() > 0)) {
             this._updateTabLayout(box);
             this._needsLayoutUpdate = false;
         }
     }
+    
+    requestLayoutUpdate(needsUpdate = true) {
+        if (this._destroyed) return;
+        this._needsLayoutUpdate = needsUpdate;
+        if (needsUpdate) {
+            this.queue_relayout();
+        }
+    }
+
+    getTabActors() {
+        if (this._destroyed) return [];
+        return this._tabsData.map(td => td.actor);
+    }
+
+    hasWindow(win) {
+        if (this._destroyed) return false;
+        return this._tabsData.some(td => td.window === win);
+    }
 
     _updateTabLayout(currentAllocationBox) {
-        if (!this.visible) return;
-
-        const children = this.get_children();
+        if (this._destroyed || !this.visible) return;
+        const children = this.get_children().filter(c => c.style_class !== 'zone-tab-drag-slot' && c.visible); // Consider only visible children for active layout
         const numChildren = children.length;
-        if (numChildren === 0) return;
+
+        if (numChildren === 0 && !this.get_children().some(c => c.style_class === 'zone-tab-drag-slot' && c.visible)) {
+            return;
+        }
 
         const tabMinWidth = this._settingsMgr.getTabMinWidth();
         const tabMaxWidth = this._settingsMgr.getTabMaxWidth();
@@ -1075,78 +1902,145 @@ export class TabBar extends St.BoxLayout {
         const tabCornerRadius = this._settingsMgr.getTabCornerRadius();
 
         const allocation = currentAllocationBox || this.get_allocation_box();
-        let contentAreaWidth = allocation.x2 - allocation.x1;
+        if (!allocation || allocation.get_width() === 0) return; // Don't layout if tab bar has no allocation
+
+        let contentAreaWidth = allocation.get_width();
         const themeNode = this.get_theme_node();
         if (themeNode) contentAreaWidth -= themeNode.get_horizontal_padding();
-
-        const totalGapWidth = (numChildren > 1) ? (numChildren - 1) * gapSpacing : 0;
+        
+        const allLayoutChildren = this.get_children().filter(c => c.visible || c.style_class === 'zone-tab-drag-slot'); // Layout visible tabs + slot
+        const numLayoutChildren = allLayoutChildren.length;
+        const totalGapWidth = (numLayoutChildren > 1) ? (numLayoutChildren - 1) * gapSpacing : 0;
         let widthForTabs = contentAreaWidth - totalGapWidth;
-        if (widthForTabs <= 0) widthForTabs = numChildren * tabMinWidth;
 
-        let tabWidth = Math.floor(widthForTabs / numChildren);
+        if (widthForTabs <= 0) {
+            widthForTabs = (numChildren > 0 ? numChildren : (numLayoutChildren > 0 ? numLayoutChildren : 1)) * tabMinWidth;
+        }
+
+        let tabWidth;
+        if (numChildren > 0) { // If there are actual tabs visible
+            tabWidth = Math.floor(widthForTabs / numChildren);
+        } else if (numLayoutChildren > 0) { // Only slot might be visible or considered
+            tabWidth = Math.floor(widthForTabs / numLayoutChildren);
+        } else {
+            return;
+        }
         tabWidth = Math.max(tabMinWidth, Math.min(tabWidth, tabMaxWidth));
-        let remainder = widthForTabs - (tabWidth * numChildren);
+
+        let remainder = (numChildren > 0) ? (widthForTabs - (tabWidth * numChildren)) : 0;
         if (remainder < 0) remainder = 0;
 
-        for (let i = 0; i < numChildren; i++) {
-            const child = children[i];
+        let currentVisualChildIndex = 0;
+        for (let i = 0; i < allLayoutChildren.length; i++) {
+            const child = allLayoutChildren[i];
+            // Skip if not the slot and not visible (though filter should handle this)
+            if (child.style_class !== 'zone-tab-drag-slot' && !child.visible) continue;
+
             let currentWidth = tabWidth;
-            if (remainder > 0) { currentWidth++; remainder--; }
+
+            if (remainder > 0 && child.style_class !== 'zone-tab-drag-slot') {
+                currentWidth++; remainder--;
+            }
             currentWidth = Math.max(tabMinWidth, Math.min(currentWidth, tabMaxWidth));
 
             child.set_width(currentWidth);
-            child.set_style(`margin-left: ${i === 0 ? 0 : gapSpacing}px; border-radius: ${tabCornerRadius}px ${tabCornerRadius}px 0 0;`);
-
+            child.set_style(`margin-left: ${currentVisualChildIndex === 0 ? 0 : gapSpacing}px; border-radius: ${tabCornerRadius}px ${tabCornerRadius}px 0 0;`);
+            
             const tabData = this._tabsData.find(td => td.actor === child);
             if (tabData && tabData.labelActor) {
                 const labelMax = currentWidth - TAB_INTERNAL_NON_LABEL_WIDTH;
                 tabData.labelActor.set_style(`max-width: ${Math.max(0, labelMax)}px`);
             }
+            currentVisualChildIndex++;
         }
     }
 
     addWindow(win) {
-        if (this._tabsData.some(td => td.window === win)) {
-            this.highlightWindow(win);
+        if (this._destroyed || this._tabsData.some(td => td.window === win)) {
+            if (!this._destroyed) this.highlightWindow(win);
             return;
         }
 
         const app = this._windowTracker.get_window_app(win);
         const { actor, labelActor } = this._buildTabActor(win, app);
+        actor.hide(); // Explicitly hide the actor before adding
 
-        this._initPointerHandlers(actor, win);
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            if (this._destroyed) {
+                actor.destroy();
+                return GLib.SOURCE_REMOVE;
+            }
 
-        const unmanageId = win.connect('unmanaging', () => this.removeWindow(win));
-        this.add_child(actor);
-        this._tabsData.push({ window: win, actor, labelActor, unmanageId });
+            const compositorPrivate = win.get_compositor_private?.();
+            if (!compositorPrivate) {
+                actor.destroy(); 
+                return GLib.SOURCE_REMOVE;
+            }
+            
+            this.add_child(actor); // Actor is added but remains hidden due to this.show_on_add = false and actor.hide()
+            
+            const unmanageId = win.connect('unmanaging', () => this.removeWindow(win));
+            this._tabsData.push({ window: win, actor, labelActor, unmanageId });
+            this._tabDragger.initPointerHandlers(actor, win);
 
-        if (!this.visible) this.visible = true;
-        this._onTabClicked(win);
-        if (actor.can_focus) actor.grab_key_focus();
-        this._needsLayoutUpdate = true;
-        this.queue_relayout();
+            if (!this.visible && this._tabsData.length > 0) {
+                this.visible = true; // Make TabBar container visible if it's the first tab
+            }
+            
+            this._needsLayoutUpdate = true;
+            this.queue_relayout(); // This will trigger allocation for the (still hidden) actor
+
+            // Defer showing and interacting until after the layout pass
+            GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                if (this._destroyed || actor.get_parent() !== this) {
+                    // Actor might have been removed if window was closed very fast
+                    return GLib.SOURCE_REMOVE;
+                }
+                
+                actor.show(); // Now show the actor, it should be allocated
+                this.highlightWindow(win); 
+                this._onTabClicked(win); 
+
+                if (actor.can_focus && actor.get_stage() && actor.get_paint_visibility()) {
+                     actor.grab_key_focus();
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+            
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _onTabCloseRequested(window) {
+        if (this._destroyed) return;
         window.delete(global.get_current_time());
     }
 
     removeWindow(win) {
+        if (this._destroyed) return;
         const idx = this._tabsData.findIndex(td => td.window === win);
         if (idx < 0) return;
 
         const tabData = this._tabsData[idx];
-        if (this._dragInfo && this._dragInfo.draggedActor === tabData.actor) {
-            this._cancelDrag(true);
+        if (this._tabDragger.isDragging() && this._tabDragger.getDraggedActor() === tabData.actor) {
+            this._tabDragger.cancelDrag(true);
         }
 
         if (tabData.unmanageId && tabData.window) {
-            try {
-                tabData.window.disconnect(tabData.unmanageId);
-            } catch (e) {
-                console.error("TabBar: Error disconnecting unmanageId on removeWindow:", e);
+            const compositorPrivate = tabData.window.get_compositor_private?.();
+            if (compositorPrivate) {
+                try {
+                    tabData.window.disconnect(tabData.unmanageId);
+                } catch (e) { /* console.error("TabBar: Error disconnecting unmanageId:", e); */ }
             }
         }
+        tabData.unmanageId = 0;
+
+        if (tabData.actor._pressTimeoutId) {
+            GLib.Source.remove(tabData.actor._pressTimeoutId);
+            tabData.actor._pressTimeoutId = 0;
+        }
+        tabData.actor._pressEventDetails = null;
 
         if (tabData.actor.get_parent() === this) {
             this.remove_child(tabData.actor);
@@ -1161,6 +2055,7 @@ export class TabBar extends St.BoxLayout {
     }
 
     highlightWindow(win) {
+        if (this._destroyed) return;
         this._tabsData.forEach(({ window: w, actor }) => {
             if (w === win) {
                 actor.add_style_pseudo_class('active');
@@ -1176,7 +2071,7 @@ export class TabBar extends St.BoxLayout {
             reactive: true,
             can_focus: true,
         });
-
+        // actor.hide(); // Not needed here, will be hidden before add_child in addWindow
         const box = new St.BoxLayout({
             vertical: false,
             style_class: 'zone-tab-content',
@@ -1218,346 +2113,60 @@ export class TabBar extends St.BoxLayout {
         box.add_child(closeButton);
 
         actor._tabWindow = win;
+        actor._pressTimeoutId = 0; 
 
         return { actor, labelActor };
     }
 
     _makeLabelText(win, app) {
-        if (app) return app.get_name() || win.get_title() || 'Untitled';
+        if (app) return app.get_name() ||
+            win.get_title() || 'Untitled';
         const c = win.get_wm_class();
         return c ? c.replace(/[-_.]+/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) : win.get_title() || 'Untitled';
     }
 
-    _initPointerHandlers(actor, win) {
-        actor._pressEventDetails = null;
-        actor._pressTimeoutId = 0;
+    destroy() {
+        if (this._destroyed) return;
+        this._destroyed = true;
 
-        actor.connect('button-press-event', (a, event) => {
-            const source = event.get_source();
-            if (source && typeof source.has_style_class_name === 'function' && source.has_style_class_name('zone-tab-close-button')) {
-                return Clutter.EVENT_PROPAGATE;
-            }
-
-            if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
-
-            actor.grab_key_focus();
-
-            if (actor._pressTimeoutId) GLib.Source.remove(actor._pressTimeoutId);
-
-            const [pressEventX, pressEventY] = event.get_coords();
-            actor._pressEventDetails = { time: event.get_time(), x: pressEventX, y: pressEventY, rawEvent: event };
-
-            actor._pressTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HOLD_TIMEOUT, () => {
-                actor._pressTimeoutId = 0;
-                if (actor._pressEventDetails) {
-                    this._beginDrag(actor, actor._pressEventDetails.rawEvent);
-                }
-                return GLib.SOURCE_REMOVE;
-            });
-
-            return Clutter.EVENT_STOP;
-        });
-
-        actor.connect('motion-event', (a, event) => {
-            if ((event.get_state() & Clutter.ModifierType.BUTTON1_MASK) && actor._pressEventDetails) {
-                if (!this._dragInfo || !this._dragInfo.isDragging) {
-                    const [currentX, currentY] = event.get_coords();
-                    const { x: startX, y: startY } = actor._pressEventDetails;
-                    if (Math.abs(currentX - startX) > DRAG_THRESHOLD || Math.abs(currentY - startY) > DRAG_THRESHOLD) {
-                        if (actor._pressTimeoutId) {
-                            GLib.Source.remove(actor._pressTimeoutId);
-                            actor._pressTimeoutId = 0;
-                        }
-                        this._beginDrag(actor, actor._pressEventDetails.rawEvent);
-                    }
+        this._tabDragger.destroy(); 
+        this._tabsData.forEach(({ unmanageId, window, actor }) => {
+            if (unmanageId && window) {
+                const compositorPrivate = window.get_compositor_private?.();
+                if (compositorPrivate) {
+                    try { window.disconnect(unmanageId); } catch (e) { /* log error */ }
                 }
             }
-            return Clutter.EVENT_PROPAGATE;
-        });
-        actor.connect('button-release-event', (a, event) => {
-            const source = event.get_source();
-            if (source && typeof source.has_style_class_name === 'function' && source.has_style_class_name('zone-tab-close-button')) {
-                return Clutter.EVENT_PROPAGATE;
-            }
-            if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
-
-            const wasPressPending = !!actor._pressTimeoutId;
             if (actor._pressTimeoutId) {
                 GLib.Source.remove(actor._pressTimeoutId);
-                actor._pressTimeoutId = 0;
-            }
-
-            const clickOccurred = wasPressPending && (!this._dragInfo || !this._dragInfo.isDragging);
-
-            if (clickOccurred) {
-                this._onTabClicked(win);
-            }
-            actor._pressEventDetails = null;
-            return Clutter.EVENT_STOP;
-        });
-    }
-
-    _beginDrag(actor, pressEvent) {
-        if (this._dragInfo && this._dragInfo.isDragging) { return; }
-        if (!actor || actor.get_parent() !== this) {
-            console.warn("TabBar: _beginDrag called for an actor not in TabBar or null actor.");
-            if (actor && actor._pressTimeoutId) GLib.Source.remove(actor._pressTimeoutId);
-            if (actor) actor._pressEventDetails = null;
-            return;
-        }
-
-        if (actor._pressTimeoutId) {
-            GLib.Source.remove(actor._pressTimeoutId);
-            actor._pressTimeoutId = 0;
-        }
-        actor._pressEventDetails = null;
-
-        const [pointerScreenX, pointerScreenY] = pressEvent.get_coords();
-        const actorAllocationInTabBar = actor.get_allocation_box();
-        const [tabBarScreenX, tabBarScreenY] = this.get_transformed_position();
-
-        const actorInitialScreenX = tabBarScreenX + actorAllocationInTabBar.x1;
-        const actorInitialScreenY = tabBarScreenY + actorAllocationInTabBar.y1;
-
-        const originalIndex = this.get_children().indexOf(actor);
-
-        const actorWidth = actor.get_width();
-        const actorHeight = actor.get_height();
-        const slotActor = new St.Bin({ style_class: 'zone-tab-drag-slot', width: actorWidth, height: actorHeight });
-
-        actor.set_opacity(200);
-        this.remove_child(actor);
-        Main.uiGroup.add_child(actor);
-        actor.set_position(actorInitialScreenX, actorInitialScreenY);
-        try {
-            if (typeof actor.raise_top === 'function') {
-                actor.raise_top();
-            } else {
-                const parent = actor.get_parent();
-                if (parent && typeof parent.set_child_above_sibling === 'function') {
-                    parent.set_child_above_sibling(actor, null);
-                }
-            }
-        } catch (e) {
-            console.error("TabBar: Error trying to raise actor.", e);
-        }
-
-        this.insert_child_at_index(slotActor, originalIndex);
-        this._dragInfo = {
-            isDragging: true,
-            draggedActor: actor,
-            slotActor: slotActor,
-            originalIndex: originalIndex,
-            actorGrabOffsetX: pointerScreenX - actorInitialScreenX,
-            actorGrabOffsetY: pointerScreenY - actorInitialScreenY,
-            motionId: global.stage.connect('motion-event', this._onDragMotion.bind(this)),
-            releaseId: global.stage.connect('button-release-event', this._onDragRelease.bind(this)),
-        };
-        this._needsLayoutUpdate = true;
-        this.queue_relayout();
-    }
-
-    _onDragMotion(stage, event) {
-        if (!this._dragInfo || !this._dragInfo.isDragging) return Clutter.EVENT_PROPAGATE;
-        const [currentPointerScreenX, currentPointerScreenY] = event.get_coords();
-        this._dragInfo.draggedActor.set_position(
-            currentPointerScreenX - this._dragInfo.actorGrabOffsetX,
-            currentPointerScreenY - this._dragInfo.actorGrabOffsetY
-        );
-        const [tabBarScreenX, ] = this.get_transformed_position();
-        const pointerXInTabBar = currentPointerScreenX - tabBarScreenX;
-
-        let newSlotIndex = 0;
-        const currentChildren = this.get_children();
-        const currentSlotActualIndex = currentChildren.indexOf(this._dragInfo.slotActor);
-
-        if (currentSlotActualIndex === -1) {
-            console.error("TabBar: Slot actor not found in TabBar during drag motion.");
-            this._cancelDrag(true);
-            return Clutter.EVENT_STOP;
-        }
-
-        let visualChildIndex = 0;
-        for (let i = 0; i < currentChildren.length; i++) {
-            const child = currentChildren[i];
-            if (child === this._dragInfo.slotActor) continue;
-
-            const childAllocation = child.get_allocation_box();
-            const childMidX = childAllocation.x1 + childAllocation.get_width() / 2;
-            if (pointerXInTabBar > childMidX) {
-                newSlotIndex = visualChildIndex + 1;
-            }
-            visualChildIndex++;
-        }
-
-        if (currentSlotActualIndex !== newSlotIndex) {
-            const tempSlot = this._dragInfo.slotActor;
-            if (tempSlot.get_parent() === this) {
-                this.set_child_at_index(tempSlot, newSlotIndex);
-            } else {
-                console.error("TabBar: Slot actor lost parentage during drag motion.");
-                this._cancelDrag(true);
-                return Clutter.EVENT_STOP;
-            }
-            this._needsLayoutUpdate = true;
-            this.queue_relayout();
-        }
-        return Clutter.EVENT_STOP;
-    }
-
-    _onDragRelease(stage, event) {
-        if (!this._dragInfo || !this._dragInfo.isDragging || event.get_button() !== 1) {
-            if (this._dragInfo) {
-                if (this._dragInfo.motionId) global.stage.disconnect(this._dragInfo.motionId);
-                if (this._dragInfo.releaseId) global.stage.disconnect(this._dragInfo.releaseId);
-            }
-            this._dragInfo = null;
-            return Clutter.EVENT_PROPAGATE;
-        }
-
-        const { draggedActor, slotActor, motionId, releaseId } = this._dragInfo;
-        if (motionId) global.stage.disconnect(motionId);
-        if (releaseId) global.stage.disconnect(releaseId);
-
-        let finalInsertionIndex = -1;
-        if (slotActor && slotActor.get_parent() === this) {
-            finalInsertionIndex = this.get_children().indexOf(slotActor);
-        } else if (slotActor) {
-            console.warn("TabBar: Slot actor not parented correctly at drag release.");
-            finalInsertionIndex = this._dragInfo.originalIndex; // Fallback to original index
-        } else { // Should not happen if drag started correctly
-            finalInsertionIndex = this._dragInfo.originalIndex;
-        }
-
-
-        if (slotActor) {
-            if (slotActor.get_parent() === this) this.remove_child(slotActor);
-            slotActor.destroy();
-        }
-
-        if (draggedActor) {
-            if (draggedActor.get_parent() === Main.uiGroup) Main.uiGroup.remove_child(draggedActor);
-            const numChildrenAfterSlotRemoval = this.get_n_children();
-            const insertionIndex = Math.max(0, Math.min(finalInsertionIndex, numChildrenAfterSlotRemoval));
-
-            this.insert_child_at_index(draggedActor, insertionIndex);
-            draggedActor.set_opacity(255);
-            draggedActor.set_translation(0, 0, 0);
-
-            const droppedWindow = draggedActor._tabWindow;
-            if (droppedWindow) {
-                this._onTabClicked(droppedWindow);
-                if (draggedActor.can_focus) draggedActor.grab_key_focus();
-            }
-        }
-
-        this._dragInfo = null;
-        this._needsLayoutUpdate = true;
-        this.queue_relayout();
-
-        return Clutter.EVENT_STOP;
-    }
-
-    _cancelDrag(forceCleanup = false) {
-        this._tabsData.forEach(td => {
-            if (td.actor._pressTimeoutId) {
-                GLib.Source.remove(td.actor._pressTimeoutId);
-                td.actor._pressTimeoutId = 0;
-            }
-            td.actor._pressEventDetails = null;
-        });
-        if (this._pressTimeoutId) {
-            GLib.Source.remove(this._pressTimeoutId);
-            this._pressTimeoutId = 0;
-        }
-
-
-        if (this._dragInfo && (this._dragInfo.isDragging || forceCleanup)) {
-            const { draggedActor, slotActor, originalIndex, motionId, releaseId } = this._dragInfo;
-            if (motionId) global.stage.disconnect(motionId);
-            if (releaseId) global.stage.disconnect(releaseId);
-
-            if (draggedActor) {
-                if (draggedActor.get_parent() === Main.uiGroup) {
-                    Main.uiGroup.remove_child(draggedActor);
-                    const isStillManaged = this._tabsData.some(td => td.actor === draggedActor);
-                    if (!forceCleanup && isStillManaged && this.get_parent()) {
-                        const childrenCount = this.get_n_children();
-                        const reinsertIdx = Math.min(originalIndex, childrenCount);
-                        if (draggedActor.get_parent() !== this) {
-                            this.insert_child_at_index(draggedActor, reinsertIdx);
-                        }
-                    } else if (!isStillManaged && !forceCleanup) {
-                        draggedActor.destroy();
-                    }
-                }
-                draggedActor.set_opacity(255);
-                draggedActor.set_translation(0, 0, 0);
-            }
-            if (slotActor) {
-                if (slotActor.get_parent() === this) this.remove_child(slotActor);
-                slotActor.destroy();
-            }
-        }
-        this._dragInfo = null;
-
-        if (this.get_parent() && (forceCleanup || (this.visible && this.get_n_children() > 0))) {
-            this._needsLayoutUpdate = true;
-            this.queue_relayout();
-        }
-    }
-
-    destroy() {
-        this._cancelDrag(true);
-        this._tabsData.forEach(({ unmanageId, window }) => {
-            if (unmanageId && window) {
-                try {
-                    window.disconnect(unmanageId);
-                } catch (e) {
-                    console.error(`TabBar: Error disconnecting unmanageId ${unmanageId} for window during destroy: ${e}`);
-                }
             }
         });
         this._tabsData = [];
-        this.get_children().forEach(actor => {
-            if (actor._pressTimeoutId) {
-                GLib.Source.remove(actor._pressTimeoutId);
-                actor._pressTimeoutId = 0;
-            }
-            actor._pressEventDetails = null;
-        });
-        if (this._pressTimeoutId) {
-            GLib.Source.remove(this._pressTimeoutId);
-            this._pressTimeoutId = 0;
-        }
-
+        
         super.destroy();
     }
 
     refreshTabVisuals() {
+        if (this._destroyed) return;
         this._tabsData.forEach(tabData => {
-            const { actor, window, labelActor } = tabData; // Keep existing labelActor reference
+            const { actor, window } = tabData; 
+            const labelActor = tabData.labelActor;
             const app = this._windowTracker.get_window_app(window);
 
             const box = actor.get_child();
-            if (!box) return;
+            if (!box) return; 
 
-            // Efficiently find and remove/update specific children
             let appIconActor = null;
             let closeButtonActor = null;
-            let existingLabelActor = null;
 
-            box.get_children().forEach(child => {
+            box.get_children().forEach(child => { 
                 if (child instanceof St.Icon && child.style_class === 'zone-tab-app-icon') {
                     appIconActor = child;
-                } else if (child instanceof St.Label) {
-                    existingLabelActor = child; // Should be tabData.labelActor
-                } else if (child instanceof St.Button && child.style_class === 'zone-tab-close-button') {
+                } else if (child instanceof St.Button && child.style_class === 'zone-tab-close-button') { 
                     closeButtonActor = child;
                 }
             });
 
-            // Update App Icon
             if (appIconActor) box.remove_child(appIconActor);
             if (app?.get_icon()) {
                 const newAppIcon = new St.Icon({
@@ -1565,26 +2174,21 @@ export class TabBar extends St.BoxLayout {
                     icon_size: this._settingsMgr.getTabIconSize(),
                     style_class: 'zone-tab-app-icon'
                 });
-                // Insert before the label
-                if (existingLabelActor) {
-                    box.insert_child_below(newAppIcon, existingLabelActor);
-                } else {
+                if (labelActor) {
+                    box.insert_child_below(newAppIcon, labelActor);
+                } else { 
                     box.add_child(newAppIcon);
                 }
             }
 
-            // Update Label (font size primarily)
-            if (existingLabelActor) { // This should be the labelActor from _tabsData
+            if (labelActor) { 
                 const fs = this._settingsMgr.getTabFontSize();
-                existingLabelActor.set_style(`font-size:${fs}px;`);
-                // Max width is handled by _updateTabLayout
+                labelActor.set_style(`font-size:${fs}px;`);
             }
 
-
-            // Update Close Button Icon
             if (closeButtonActor) {
                 const oldIcon = closeButtonActor.get_child();
-                if (oldIcon) oldIcon.destroy(); // Destroy old icon
+                if (oldIcon) oldIcon.destroy();
                 closeButtonActor.set_child(new St.Icon({
                     icon_name: 'window-close-symbolic',
                     icon_size: this._settingsMgr.getTabCloseButtonIconSize(),
@@ -2198,525 +2802,60 @@ export class Indicator {
 
 ===== FILE: ./prefs.js =====
 // prefs.js
+import Adw from 'gi://Adw'; // [cite: 511]
+import Gdk from 'gi://Gdk'; // [cite: 512]
+import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; // [cite: 513]
 
-import Adw from 'gi://Adw';
-import Gtk from 'gi://Gtk';
-import Gio from 'gi://Gio';
-import GObject from 'gi://GObject';
-import Gdk from 'gi://Gdk';
-import { ExtensionPreferences, gettext as _ } from
-        'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+// Import new preference group modules
+import { createGeneralSettingsGroup } from './preferences/GeneralSettingsGroup.js';
+import { createTabBarSettingsGroup } from './preferences/TabBarSettingsGroup.js';
+import { ZoneDefinitionsGroup } from './preferences/ZoneDefinitionsGroup.js';
 
-const ZONE_SETTINGS_KEY                     = 'zones';
-const ENABLE_ZONING_KEY                     = 'enable-auto-zoning';
-const RESTORE_ON_UNTILE_KEY                 = 'restore-original-size-on-untile';
-const TILE_NEW_WINDOWS_KEY                  = 'tile-new-windows';
-const HIGHLIGHT_ON_HOVER_KEY                = 'highlight-on-hover';
-const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator';
-const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator';
-const TAB_BAR_HEIGHT_KEY                    = 'tab-bar-height';
-const TAB_FONT_SIZE_KEY                     = 'tab-font-size';
-const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size';
-const TAB_ICON_SIZE_KEY                     = 'tab-icon-size';
-const TAB_CORNER_RADIUS_KEY                 = 'tab-corner-radius';
-const TAB_CLOSE_BUTTON_ICON_SIZE_KEY        = 'tab-close-button-icon-size';
-const TAB_SPACING_KEY                       = 'tab-spacing';
-const TAB_MIN_WIDTH_KEY                     = 'tab-min-width';
-const TAB_MAX_WIDTH_KEY                     = 'tab-max-width';
-const SNAP_EVASION_KEY                      = 'snap-evasion-key';
+const SNAP_EVASION_KEY = 'snap-evasion-key'; // [cite: 530]
+const log = msg => console.log(`[AutoZonerPrefs] ${msg}`); // [cite: 531]
 
-
-const log = msg => console.log(`[AutoZonerPrefs] ${msg}`);
-
-class ZoneEditorGrid extends Gtk.Grid {
-    static {
-        GObject.registerClass({ Signals: { 'changed': {} } }, this);
-    }
-
-    constructor(zoneData, monitorCount) {
-        super({
-            column_spacing: 12,
-            row_spacing: 6,
-            margin_top: 10,
-            margin_bottom: 10,
-            margin_start: 10,
-            margin_end: 10,
-            hexpand: true,
-        });
-        this._zone = { ...zoneData };
-
-        this.attach(new Gtk.Label({ label: _('Name:'), halign: Gtk.Align.END }), 0, 0, 1, 1);
-        this._nameEntry = new Gtk.Entry({ text: this._zone.name || '', hexpand: true });
-        this._nameEntry.connect('changed', () => {
-            this._zone.name = this._nameEntry.get_text();
-            this.emit('changed');
-        });
-        this.attach(this._nameEntry, 1, 0, 3, 1);
-
-        this.attach(new Gtk.Label({ label: _('Monitor Index:'), halign: Gtk.Align.END }), 0, 1, 1, 1);
-        this._monitorSpin = Gtk.SpinButton.new_with_range(0, Math.max(0, monitorCount - 1), 1);
-        this._monitorSpin.set_value(this._zone.monitorIndex || 0);
-        this._monitorSpin.connect('value-changed', () => {
-            this._zone.monitorIndex = this._monitorSpin.get_value_as_int();
-            this.emit('changed');
-        });
-        this.attach(this._monitorSpin, 1, 1, 1, 1);
-
-        const fields = [
-            { label: _('X:'), key: 'x' }, { label: _('Y:'), key: 'y' },
-            { label: _('Width:'), key: 'width' }, { label: _('Height:'), key: 'height' }
-        ];
-        fields.forEach((f, i) => {
-            const row = Math.floor(i / 2) + 2;
-            const col = (i % 2) * 2;
-            this.attach(new Gtk.Label({ label: f.label, halign: Gtk.Align.END }), col, row, 1, 1);
-            const spin = Gtk.SpinButton.new_with_range(0, 10000, 10);
-            spin.set_value(this._zone[f.key] || 0);
-            spin.set_hexpand(true);
-            spin.connect('value-changed', () => {
-                this._zone[f.key] = spin.get_value_as_int();
-                this.emit('changed');
-            });
-            this.attach(spin, col + 1, row, 1, 1);
-        });
-    }
-
-    get_zone_data() {
-        return { ...this._zone };
-    }
-}
 
 export default class AutoZonerPrefs extends ExtensionPreferences {
     fillPreferencesWindow(window) {
-        this._settings = this.getSettings();
-        this._window = window;
+        this._settings = this.getSettings(); // [cite: 544]
+        this._window = window; // [cite: 545]
+        this._evasionKeySignalId = 0;
 
-        const display = Gdk.Display.get_default();
-        const monitorCount = display?.get_monitors().get_n_items() || 1; // Fallback to 1 monitor if display is null
-        const page = new Adw.PreferencesPage();
-        window.add(page);
+        const display = Gdk.Display.get_default(); // [cite: 545]
+        // CORRECTED LINE:
+        const monitorCount = display?.get_monitors().get_n_items() || 1; // [cite: 545]
+        
+        const page = new Adw.PreferencesPage(); // [cite: 546]
+        window.add(page); // [cite: 547]
 
         // General Settings Group
-        const generalGroup = new Adw.PreferencesGroup({ title: _('General Settings') });
+        const { group: generalGroup, evasionKeySettingChangedId } = createGeneralSettingsGroup(this._settings); // [cite: 547]
         page.add(generalGroup);
-
-        // Enable Auto Zoning
-        const enableSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
-        this._settings.bind(ENABLE_ZONING_KEY, enableSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
-        const enableRow = new Adw.ActionRow({
-            title: _('Enable Auto Zoning'),
-            subtitle: _('Globally enable or disable the extension'),
-            activatable_widget: enableSwitch
-        });
-        enableRow.add_suffix(enableSwitch);
-        generalGroup.add(enableRow);
-        
-        // Snap Evasion Key
-        const evasionKeyChoices = [
-            { value: 'disabled', label: _('Disabled') },
-            { value: 'control',  label: _('Control') },
-            { value: 'alt',      label: _('Alt') },
-            { value: 'shift',    label: _('Shift') },
-            { value: 'super',    label: _('Super (Windows/Cmd)') }
-        ];
-        const evasionKeyModel = new Gtk.StringList();
-        evasionKeyChoices.forEach(choice => evasionKeyModel.append(choice.label));
-
-        const evasionKeyRow = new Adw.ComboRow({
-            title: _('Snap Evasion Key'),
-            subtitle: _('Hold this key while dragging to prevent snapping'),
-            model: evasionKeyModel,
-        });
-
-        // Map stored GSettings value to ComboRow index and vice-versa
-        const currentEvasionKey = this._settings.get_string(SNAP_EVASION_KEY);
-        let currentEvasionKeyIndex = evasionKeyChoices.findIndex(c => c.value === currentEvasionKey);
-        if (currentEvasionKeyIndex === -1) currentEvasionKeyIndex = 0; // Default to 'disabled' if unknown
-        evasionKeyRow.selected = currentEvasionKeyIndex;
-
-        evasionKeyRow.connect('notify::selected', () => {
-            const selectedIndex = evasionKeyRow.selected;
-            if (selectedIndex >= 0 && selectedIndex < evasionKeyChoices.length) {
-                this._settings.set_string(SNAP_EVASION_KEY, evasionKeyChoices[selectedIndex].value);
-            }
-        });
-        // Also update ComboRow if GSetting changes externally (e.g. dconf)
-        // However, direct binding to GSettings key of type 's' with enum/choices defined in schema
-        // might work more directly if Adw.ComboRow supports it.
-        // For now, manual sync is safer or use a custom binding.
-        // A simpler direct binding for string enums (if supported directly by Adw.ComboRow binding):
-        // this._settings.bind(SNAP_EVASION_KEY, evasionKeyRow, 'selected-item.string', Gio.SettingsBindFlags.DEFAULT);
-        // For now, using manual connection. The `choices` in gschema will enforce valid values.
-        // We need to bind to a property that accepts string values from the GSetting.
-        // Let's use a simpler binding approach if `Adw.ComboRow` selected can be directly mapped.
-        // The issue is binding the string value directly.
-        // Adw.PreferencesRow.bind_property_full could be used for more complex bindings.
-
-        // Let's stick to the manual connection for clarity for now.
-        // To reflect external changes in the UI:
-        const evasionKeySettingChangedId = this._settings.connect(`changed::${SNAP_EVASION_KEY}`, () => {
-            const updatedKey = this._settings.get_string(SNAP_EVASION_KEY);
-            let updatedIndex = evasionKeyChoices.findIndex(c => c.value === updatedKey);
-            if (updatedIndex === -1) updatedIndex = 0;
-            if (evasionKeyRow.selected !== updatedIndex) {
-                evasionKeyRow.selected = updatedIndex;
-            }
-        });
-        // Make sure to disconnect this signal when the window is destroyed.
-        // Typically, ExtensionPreferences handles this for bindings, but manual connections need manual disconnect.
-        // However, `fillPreferencesWindow` is called once, so this signal lives with the prefs window.
-
-        generalGroup.add(evasionKeyRow);
+        this._evasionKeySignalId = evasionKeySettingChangedId;
 
 
-        // Highlight on Hover
-        const hoverSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
-        this._settings.bind(HIGHLIGHT_ON_HOVER_KEY, hoverSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
-        const hoverRow = new Adw.ActionRow({
-            title: _('Highlight Zone on Hover'),
-            subtitle: _('Visually highlight a zone when dragging a window over it'),
-            activatable_widget: hoverSwitch
-        });
-        hoverRow.add_suffix(hoverSwitch);
-        generalGroup.add(hoverRow);
-
-        // Restore Original Size on Untile
-        const restoreSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
-        this._settings.bind(RESTORE_ON_UNTILE_KEY, restoreSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
-        const restoreRow = new Adw.ActionRow({
-            title: _('Restore Original Size on Untile'),
-            subtitle: _('When a window leaves all zones, restore its original size/position'),
-            activatable_widget: restoreSwitch
-        });
-        restoreRow.add_suffix(restoreSwitch);
-        generalGroup.add(restoreRow);
-
-        // Tile New Windows
-        const tileSwitch = new Gtk.Switch({ valign: Gtk.Align.CENTER });
-        this._settings.bind(TILE_NEW_WINDOWS_KEY, tileSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
-        const tileRow = new Adw.ActionRow({
-            title: _('Tile New Windows'),
-            subtitle: _('Automatically tile newly opened windows if they fall into a zone'),
-            activatable_widget: tileSwitch
-        });
-        tileRow.add_suffix(tileSwitch);
-        generalGroup.add(tileRow);
-
-        // Cycle Zone Windows Shortcut (forward)
-        const accelEntry = new Gtk.Entry({
-            hexpand: true,
-            placeholder_text: '<Control><Alt>8'
-        });
-        const existing = this._settings.get_strv(CYCLE_ACCELERATOR_KEY);
-        accelEntry.set_text(existing[0] || '');
-        accelEntry.connect('changed', () => { // Use 'changed' for live update, 'activate' for Enter
-            const text = accelEntry.get_text().trim();
-            // Basic validation or use Gtk.ShortcutsShortcut for better accel input
-            if (text) { // Could add Gtk.accelerator_valid(text, null) if desired
-                this._settings.set_strv(CYCLE_ACCELERATOR_KEY, [ text ]);
-                log(`Set cycle shortcut: ${text}`);
-            } else { // Clear if empty
-                this._settings.set_strv(CYCLE_ACCELERATOR_KEY, []);
-            }
-        });
-        const accelRow = new Adw.ActionRow({
-            title: _('Cycle Zone Windows Shortcut'),
-            subtitle: _('E.g. <Control><Alt>8 or <Super>grave'),
-        });
-        accelRow.add_suffix(accelEntry);
-        accelRow.activatable_widget = accelEntry;
-        generalGroup.add(accelRow);
-
-        // Cycle Zone Windows Backward Shortcut
-        const backwardAccelEntry = new Gtk.Entry({
-            hexpand: true,
-            placeholder_text: '<Control><Alt>9'
-        });
-        const existingBackward = this._settings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY);
-        backwardAccelEntry.set_text(existingBackward[0] || '');
-        backwardAccelEntry.connect('changed', () => {
-            const text = backwardAccelEntry.get_text().trim();
-            if (text) {
-                this._settings.set_strv(CYCLE_BACKWARD_ACCELERATOR_KEY, [ text ]);
-                log(`Set backward cycle shortcut: ${text}`);
-            } else {
-                this._settings.set_strv(CYCLE_BACKWARD_ACCELERATOR_KEY, []);
-            }
-        });
-        const backwardAccelRow = new Adw.ActionRow({
-            title: _('Cycle Zone Windows Backward Shortcut'),
-            subtitle: _('E.g. <Control><Shift><Alt>9 or <Super><Shift>grave'),
-        });
-        backwardAccelRow.add_suffix(backwardAccelEntry);
-        backwardAccelRow.activatable_widget = backwardAccelEntry;
-        generalGroup.add(backwardAccelRow);
-        
         // Tab Bar Adjustments Group
-        const tabBarGroup = new Adw.PreferencesGroup({ title: _('Tab Bar Adjustments') });
+        const tabBarGroup = createTabBarSettingsGroup(this._settings); // [cite: 584]
         page.add(tabBarGroup);
 
-        // Tab Bar Height
-        const heightSpin = Gtk.SpinButton.new_with_range(16, 200, 1);
-        this._settings.bind(TAB_BAR_HEIGHT_KEY, heightSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
-        const heightRow = new Adw.ActionRow({
-            title: _('Tab Bar Height (px)'),
-            subtitle: _('Height in pixels for the tab bar'),
-            activatable_widget: heightSpin
-        });
-        heightRow.add_suffix(heightSpin);
-        tabBarGroup.add(heightRow); // Corrected group
-
-        // Tab Font Size
-        const fontSpin = Gtk.SpinButton.new_with_range(6, 72, 1);
-        this._settings.bind(TAB_FONT_SIZE_KEY, fontSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
-        const fontRow = new Adw.ActionRow({
-            title: _('Tab Font Size (px)'),
-            subtitle: _('Font size in pixels for the tab labels'),
-            activatable_widget: fontSpin
-        });
-        fontRow.add_suffix(fontSpin);
-        tabBarGroup.add(fontRow); // Corrected group
-
-        // Zone Gap Size
-        const gapSpin = Gtk.SpinButton.new_with_range(0, 50, 1);
-        this._settings.bind(ZONE_GAP_SIZE_KEY, gapSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
-        const gapRow = new Adw.ActionRow({
-            title: _('Zone Gap Size (px)'),
-            subtitle: _('Gap around zones. 0 for no gaps. Re-snap windows to apply.'),
-            activatable_widget: gapSpin
-        });
-        gapRow.add_suffix(gapSpin);
-        tabBarGroup.add(gapRow); // Corrected group (This was general, moving to tab if makes sense, or keep in general)
-                                // User asked for "Tab Bar Adjustments" section. Zone Gap is not strictly tab bar. Let's keep it in General for now or create "Appearance".
-                                // Re-reading original request, "Tab Bar Adjustments" was for tab-specific things.
-                                // Let's put Zone Gap back in General or a new "Layout/Appearance" Group if more such items appear.
-                                // For now, moving it from Tab Bar group, as it affects zones, not just tabs.
-        generalGroup.add(gapRow); // Moved back to general settings.
-
-
-        // Tab Icon Size
-        const tabIconSizeSpin = Gtk.SpinButton.new_with_range(8, 64, 1);
-        this._settings.bind(TAB_ICON_SIZE_KEY, tabIconSizeSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
-        const tabIconSizeRow = new Adw.ActionRow({
-            title: _('Tab Icon Size (px)'),
-            subtitle: _('Size for application icons in tabs'),
-            activatable_widget: tabIconSizeSpin
-        });
-        tabIconSizeRow.add_suffix(tabIconSizeSpin);
-        tabBarGroup.add(tabIconSizeRow);
-
-        // Tab Corner Radius
-        const tabCornerRadiusSpin = Gtk.SpinButton.new_with_range(0, 20, 1);
-        this._settings.bind(TAB_CORNER_RADIUS_KEY, tabCornerRadiusSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
-        const tabCornerRadiusRow = new Adw.ActionRow({
-            title: _('Tab Corner Radius (px)'),
-            subtitle: _('Radius for the top corners of tabs'),
-            activatable_widget: tabCornerRadiusSpin
-        });
-        tabCornerRadiusRow.add_suffix(tabCornerRadiusSpin);
-        tabBarGroup.add(tabCornerRadiusRow);
-
-        // Tab Close Button Icon Size
-        const tabCloseButtonIconSizeSpin = Gtk.SpinButton.new_with_range(8, 32, 1);
-        this._settings.bind(TAB_CLOSE_BUTTON_ICON_SIZE_KEY, tabCloseButtonIconSizeSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
-        const tabCloseButtonIconSizeRow = new Adw.ActionRow({
-            title: _('Tab Close Button Icon Size (px)'),
-            subtitle: _('Size for the close icon in tabs'),
-            activatable_widget: tabCloseButtonIconSizeSpin
-        });
-        tabCloseButtonIconSizeRow.add_suffix(tabCloseButtonIconSizeSpin);
-        tabBarGroup.add(tabCloseButtonIconSizeRow);
-
-        // Tab Spacing
-        const tabSpacingSpin = Gtk.SpinButton.new_with_range(0, 50, 1);
-        this._settings.bind(TAB_SPACING_KEY, tabSpacingSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
-        const tabSpacingRow = new Adw.ActionRow({
-            title: _('Tab Spacing (px)'),
-            subtitle: _('Gap between individual tabs'),
-            activatable_widget: tabSpacingSpin
-        });
-        tabSpacingRow.add_suffix(tabSpacingSpin);
-        tabBarGroup.add(tabSpacingRow);
-
-        // Tab Min Width
-        const tabMinWidthSpin = Gtk.SpinButton.new_with_range(30, 300, 5);
-        this._settings.bind(TAB_MIN_WIDTH_KEY, tabMinWidthSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
-        const tabMinWidthRow = new Adw.ActionRow({
-            title: _('Tab Minimum Width (px)'),
-            subtitle: _('Smallest width a tab can shrink to'),
-            activatable_widget: tabMinWidthSpin
-        });
-        tabMinWidthRow.add_suffix(tabMinWidthSpin);
-        tabBarGroup.add(tabMinWidthRow);
-
-        // Tab Max Width
-        const tabMaxWidthSpin = Gtk.SpinButton.new_with_range(50, 500, 5);
-        this._settings.bind(TAB_MAX_WIDTH_KEY, tabMaxWidthSpin, 'value', Gio.SettingsBindFlags.DEFAULT);
-        const tabMaxWidthRow = new Adw.ActionRow({
-            title: _('Tab Maximum Width (px)'),
-            subtitle: _('Largest width a tab can expand to'),
-            activatable_widget: tabMaxWidthSpin
-        });
-        tabMaxWidthRow.add_suffix(tabMaxWidthSpin);
-        tabBarGroup.add(tabMaxWidthRow);
-
-
         // Zone Definitions Group
-        this._zonesGroup = new Adw.PreferencesGroup({
-            title: _('Zone Definitions'),
-            description: _('Define screen areas where windows will tile automatically.')
-        });
-        page.add(this._zonesGroup);
+        this._zoneDefinitionsManager = new ZoneDefinitionsGroup(this._settings, monitorCount, window);
+        page.add(this._zoneDefinitionsManager.getWidget());
 
-        this._loadZonesToUI(monitorCount);
-
-        this._addButtonRow = new Adw.ActionRow();
-        const addButton = new Gtk.Button({
-            label: _('Add New Zone'),
-            halign: Gtk.Align.CENTER,
-            css_classes: ['suggested-action']
-        });
-        addButton.connect('clicked', () => this._addZone(monitorCount));
-        this._addButtonRow.set_child(addButton);
-        this._zonesGroup.add(this._addButtonRow);
 
         // Disconnect the signal when the preferences window is destroyed
-        // This assumes `window` is the main preferences window passed to `fillPreferencesWindow`
-        if (window && typeof window.connect === 'function') { // Gtk.Window
-            window.connect('close-request', () => { // Or 'destroy'
-                if (this._settings && evasionKeySettingChangedId > 0) {
+        if (window && typeof window.connect === 'function') { // [cite: 610]
+            window.connect('close-request', () => { // Or 'destroy' // [cite: 610]
+                if (this._settings && this._evasionKeySignalId > 0) { // [cite: 610]
                     try {
-                        this._settings.disconnect(evasionKeySettingChangedId);
+                        this._settings.disconnect(this._evasionKeySignalId); // [cite: 611]
+                        this._evasionKeySignalId = 0;
                     } catch (e) {
-                        log(`Error disconnecting evasionKeySettingChangedId: ${e}`);
+                        log(`Error disconnecting evasionKeySettingChangedId: ${e}`); // [cite: 611]
                     }
                 }
             });
-        } else if (window && typeof window.get_settings === 'function' && window.get_settings() === this._settings) {
-             // If 'window' is the ExtensionPreferences object itself, it doesn't have a 'destroy' to connect to directly for this signal.
-             // The signal will live as long as this._settings object, which is usually fine for prefs.
         }
-    }
-
-    _loadZonesToUI(monitorCount) {
-        // Clear previous expanders except the add button row
-        let child = this._zonesGroup.get_first_child();
-        while (child && child !== this._addButtonRow) { // Check against _addButtonRow
-            const next = child.get_next_sibling();
-            if (child instanceof Adw.ExpanderRow) { // Only remove expander rows
-                this._zonesGroup.remove(child);
-            }
-            child = next;
-        }
-        if (this._addButtonRow && this._addButtonRow.get_parent() === this._zonesGroup) { // Ensure add button is last
-             this._zonesGroup.remove(this._addButtonRow);
-        }
-
-
-        let zones = [];
-        try {
-            zones = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY));
-            if (!Array.isArray(zones)) zones = [];
-        } catch (e) {
-            log(`Error parsing zones JSON: ${e}`);
-            zones = [];
-        }
-
-        zones.forEach(zoneData => this._createAndAddZoneExpander(zoneData, monitorCount));
-        
-        // Re-add the add button row if it was defined
-        if (this._addButtonRow) {
-            this._zonesGroup.add(this._addButtonRow);
-        }
-    }
-
-    _createAndAddZoneExpander(zoneData, monitorCount) {
-        const editorGrid = new ZoneEditorGrid(zoneData, monitorCount);
-        const expanderRow = new Adw.ExpanderRow({
-            title: zoneData.name || _('Unnamed Zone'),
-            subtitle: `X:${zoneData.x}, Y:${zoneData.y}, W:${zoneData.width}, H:${zoneData.height}, M:${zoneData.monitorIndex + 1}` // Assuming 1-based for display
-        });
-        expanderRow.add_row(editorGrid);
-
-        const removeButton = new Gtk.Button({
-            icon_name: 'edit-delete-symbolic',
-            valign: Gtk.Align.CENTER,
-            tooltip_text: _("Remove this zone"),
-            css_classes: ['flat', 'circular']
-        });
-        expanderRow.add_suffix(removeButton);
-        expanderRow.set_enable_expansion(true);
-
-        editorGrid.connect('changed', () => {
-            const cd = editorGrid.get_zone_data();
-            expanderRow.title    = cd.name || _('Unnamed Zone');
-            expanderRow.subtitle = `X:${cd.x}, Y:${cd.y}, W:${cd.width}, H:${cd.height}, M:${cd.monitorIndex + 1}`;
-            this._saveZones();
-        });
-        removeButton.connect('clicked', () => {
-            const dialog = new Adw.MessageDialog({
-                heading: _("Remove Zone?"),
-                body:    _("Are you sure you want to remove “%s”?").format(expanderRow.title),
-                transient_for: this._window.get_root(), // Get root window for dialog
-                modal: true
-            });
-            dialog.add_response("cancel", _("Cancel"));
-            dialog.add_response("remove", _("Remove"));
-            dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE);
-            dialog.connect("response", (d, resp) => {
-                if (resp === "remove") {
-                    this._zonesGroup.remove(expanderRow);
-                    this._saveZones();
-                }
-                d.destroy();
-            });
-            dialog.present();
-        });
-
-        if (this._addButtonRow) { // Insert before the add button
-            this._zonesGroup.add_before(expanderRow, this._addButtonRow);
-        } else { // Fallback if add button isn't ready (should not happen with current flow)
-            this._zonesGroup.add(expanderRow);
-        }
-    }
-
-    _addZone(monitorCount) {
-        let current = [];
-        try {
-            current = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)) || [];
-        } catch {}
-        const idx = current.length + 1;
-        const newZone = {
-            monitorIndex: 0, // Default to first monitor
-            name:         _('New Zone %d').format(idx),
-            x: 0, y: 0, width: 600, height: 400 // Some default size
-        };
-        this._createAndAddZoneExpander(newZone, monitorCount);
-        this._saveZones(); // This will also re-add the button at the end
-    }
-
-    _saveZones() {
-        const zones = [];
-        let child = this._zonesGroup.get_first_child();
-        while (child) {
-            if (child instanceof Adw.ExpanderRow && child.get_n_rows() > 0) {
-                const firstRowContent = child.get_row_at_index(0);
-                // Check if the first child of ExpanderRow is indeed our ZoneEditorGrid
-                if (firstRowContent instanceof ZoneEditorGrid) {
-                    zones.push(firstRowContent.get_zone_data());
-                } else if (firstRowContent instanceof Adw.ActionRow && firstRowContent.get_child() instanceof ZoneEditorGrid) {
-                    // Sometimes the grid might be wrapped in an ActionRow by AdwExpanderRow implicitly or due to other structures.
-                     zones.push(firstRowContent.get_child().get_zone_data());
-                } else {
-                    // If ZoneEditorGrid is nested differently, adjust this logic or ensure ZoneEditorGrid is always the direct row.
-                    // For Adw.ExpanderRow.add_row(widget), widget becomes the row.
-                    log('Warning: Could not find ZoneEditorGrid in ExpanderRow to save zone data.');
-                }
-            }
-            child = child.get_next_sibling();
-        }
-        this._settings.set_string(ZONE_SETTINGS_KEY, JSON.stringify(zones));
-        log(`Saved ${zones.length} zones.`);
     }
 }
 
