@@ -18,7 +18,7 @@
 
 /* Individual Tab (St.Button) */
 .zone-tab {
-    background-color: rgba(50, 50, 50, 0.8);
+    background-color: rgba(50, 50, 50, 1);
     color: #ffffff;
     border-radius: 4px 4px 0 0; /* Fallback, overridden by inline style from TabBar.js for corners */
     padding: 2px 6px;
@@ -28,13 +28,13 @@
 }
 
 .zone-tab:hover {
-    background-color: rgba(70, 70, 70, 0.9);
+    background-color: rgba(70, 70, 70, 1);
 }
 
 .zone-tab:active,
 .zone-tab:focus,
 .zone-tab.active {
-    background-color: rgba(78, 154, 249, 0.7);
+    background-color: rgba(78, 154, 249, 1);
     color: #ffffff;
 }
 
