@@ -5,6 +5,7 @@ import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import Mtk from 'gi://Mtk'; //
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import Shell from 'gi://Shell'; // Added for WindowTracker
 
 import { ZoneDetector } from './ZoneDetector.js'; //
 import { TabBar } from './TabBar.js'; //
@@ -24,6 +25,7 @@ export class WindowManager {
         this._highlightManager = highlightManager; //
         this._zoneDetector = new ZoneDetector(); //
         this._signalConnections = []; //
+        this._windowTracker = Shell.WindowTracker.get_default(); // Added for app info
 
         this._snappedWindows = {}; //
         this._cycleIndexByZone = {}; //
@@ -240,7 +242,23 @@ export class WindowManager {
         const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon); //
         if (zoneDef) { //
             this._snapWindowToZone(window, zoneDef, true); //
-            log('_onGrabOpEnd', `Snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`); //
+            //log('_onGrabOpEnd', `Snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`); //
+            
+            // MODIFIED LOG LINE STARTS HERE
+            const app = this._windowTracker.get_window_app(window);
+            const appName = app ? app.get_name() : 'N/A'; // Default tab name
+            const appId = app ? app.get_id() : 'N/A';
+            const wmClass = window.get_wm_class() || 'N/A';
+            const wmClassInstance = window.get_wm_class_instance() || 'N/A';
+                        
+            log('_onGrabOpEnd',
+                `\nSnapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}". ` +
+                `App Info: 1. Name: "${appName}", 2. App ID: "${appId}" , ` +
+                `3. WM_CLASS: "${wmClass}", 4. WM_CLASS_INSTANCE: "${wmClassInstance}"`
+            );
+            // MODIFIED LOG LINE ENDS HERE
+            
+            
         } else { //
             this._unsnapWindow(window); //
         }
