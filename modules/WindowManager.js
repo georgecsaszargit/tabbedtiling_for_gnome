@@ -251,11 +251,11 @@ export class WindowManager {
             const wmClass = window.get_wm_class() || 'N/A';
             const wmClassInstance = window.get_wm_class_instance() || 'N/A';
                         
-            log('_onGrabOpEnd',
-                `\nSnapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}". ` +
+            /*log('_onGrabOpEnd',
+                `\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSnapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}". ` +
                 `App Info: 1. Name: "${appName}", 2. App ID: "${appId}" , ` +
                 `3. WM_CLASS: "${wmClass}", 4. WM_CLASS_INSTANCE: "${wmClassInstance}"`
-            );
+            );*/
             // MODIFIED LOG LINE ENDS HERE
             
             
