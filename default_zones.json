@@ -5,7 +5,7 @@
     "x": 0,
     "y": 0,
     "width": 1800,
-    "height": 1440
+    "height": 1407
   },
   {
     "monitorIndex": 0,
@@ -13,7 +13,7 @@
     "x": 1800,
     "y": 0,
     "width": 1800,
-    "height": 1440
+    "height": 1407
   },
    {
     "monitorIndex": 0,
@@ -21,6 +21,6 @@
     "x": 3600,
     "y": 0,
     "width": 1459,
-    "height": 1440
+    "height": 1407
   }
 ]
