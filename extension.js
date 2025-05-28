@@ -1,360 +1,360 @@
 // extension.js
 
-import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js'; // [cite: 9]
-import * as Main from 'resource:///org/gnome/shell/ui/main.js'; // [cite: 9]
-import Meta from 'gi://Meta'; // [cite: 9]
-import Shell from 'gi://Shell'; // [cite: 10]
-import GLib from 'gi://GLib'; // [cite: 10]
-import Gio from 'gi://Gio'; // [cite: 10]
+import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js'; 
+import * as Main from 'resource:///org/gnome/shell/ui/main.js'; 
+import Meta from 'gi://Meta'; 
+import Shell from 'gi://Shell'; 
+import GLib from 'gi://GLib'; 
+import Gio from 'gi://Gio'; 
 
-import { SettingsManager } from './modules/SettingsManager.js'; // [cite: 10]
-import { HighlightManager } from './modules/HighlightManager.js'; // [cite: 11]
-import { WindowManager } from './modules/WindowManager.js'; // [cite: 11]
-import { Indicator } from './modules/Indicator.js'; // [cite: 11]
-const ENABLE_ZONING_KEY = 'enable-auto-zoning'; // [cite: 12]
-const CYCLE_ACCELERATOR_KEY = 'cycle-zone-windows-accelerator'; // [cite: 12]
-const CYCLE_BACKWARD_ACCELERATOR_KEY = 'cycle-zone-windows-backward-accelerator'; // [cite: 12]
-const ZONE_GAP_SIZE_KEY = 'zone-gap-size'; // [cite: 12]
-const TAB_BAR_HEIGHT_KEY = 'tab-bar-height'; // [cite: 12]
-// New Tab Bar Adjustment Keys (ensure these match gschema and SettingsManager) // [cite: 13]
-const TAB_ICON_SIZE_KEY = 'tab-icon-size'; // [cite: 13]
-const TAB_CORNER_RADIUS_KEY = 'tab-corner-radius'; // [cite: 13]
-const TAB_CLOSE_BUTTON_ICON_SIZE_KEY = 'tab-close-button-icon-size'; // [cite: 14]
-const TAB_SPACING_KEY = 'tab-spacing'; // [cite: 14]
-const TAB_MIN_WIDTH_KEY = 'tab-min-width'; // [cite: 14]
-const TAB_MAX_WIDTH_KEY = 'tab-max-width'; // [cite: 14]
-const TAB_FONT_SIZE_KEY = 'tab-font-size'; // [cite: 14]
-// Already existed but good to have with other tab keys // [cite: 15]
+import { SettingsManager } from './modules/SettingsManager.js'; 
+import { HighlightManager } from './modules/HighlightManager.js'; 
+import { WindowManager } from './modules/WindowManager.js'; 
+import { Indicator } from './modules/Indicator.js'; 
+const ENABLE_ZONING_KEY = 'enable-auto-zoning'; 
+const CYCLE_ACCELERATOR_KEY = 'cycle-zone-windows-accelerator'; 
+const CYCLE_BACKWARD_ACCELERATOR_KEY = 'cycle-zone-windows-backward-accelerator'; 
+const ZONE_GAP_SIZE_KEY = 'zone-gap-size'; 
+const TAB_BAR_HEIGHT_KEY = 'tab-bar-height'; 
+// New Tab Bar Adjustment Keys (ensure these match gschema and SettingsManager) 
+const TAB_ICON_SIZE_KEY = 'tab-icon-size'; 
+const TAB_CORNER_RADIUS_KEY = 'tab-corner-radius'; 
+const TAB_CLOSE_BUTTON_ICON_SIZE_KEY = 'tab-close-button-icon-size'; 
+const TAB_SPACING_KEY = 'tab-spacing'; 
+const TAB_MIN_WIDTH_KEY = 'tab-min-width'; 
+const TAB_MAX_WIDTH_KEY = 'tab-max-width'; 
+const TAB_FONT_SIZE_KEY = 'tab-font-size'; 
+// Already existed but good to have with other tab keys 
 
-const log = msg => console.log(`[AutoZoner.Main] ${msg}`); // [cite: 15]
+const log = msg => console.log(`[AutoZoner.Main] ${msg}`); 
 const SessionManagerIface = `
 <node>
     <interface name="org.gnome.SessionManager">
         <signal name="Resumed" />
     </interface>
-</node>`; // [cite: 16]
-const SessionManagerProxy = Gio.DBusProxy.makeProxyWrapper(SessionManagerIface); // [cite: 17]
+</node>`; 
+const SessionManagerProxy = Gio.DBusProxy.makeProxyWrapper(SessionManagerIface); 
 
 export default class AutoZonerExtension extends Extension {
     constructor(metadata) {
-        super(metadata); // [cite: 17]
-        this._settingsManager = null; // [cite: 18]
-        this._highlightManager = null; // [cite: 18]
-        this._windowManager = null; // [cite: 18]
-        this._indicator = null; // [cite: 18]
-        this._monitorsChangedId = 0; // [cite: 18]
-        this._snapOnMonitorsChangedTimeoutId = 0; // [cite: 18]
-        this._zoningChangedId = 0; // [cite: 19]
-        this._cycleAccelChangedId = 0; // [cite: 19]
-        this._cycleBackwardAccelChangedId = 0; // [cite: 19]
-        this._zoneGapChangedId = 0; // [cite: 19]
-        this._tabBarHeightChangedId = 0; // [cite: 19]
-        this._tabFontSizeChangedId = 0; // [cite: 19]
-        // For completeness if dynamic changes are needed // [cite: 20]
+        super(metadata); 
+        this._settingsManager = null; 
+        this._highlightManager = null; 
+        this._windowManager = null; 
+        this._indicator = null; 
+        this._monitorsChangedId = 0; 
+        this._snapOnMonitorsChangedTimeoutId = 0; 
+        this._zoningChangedId = 0; 
+        this._cycleAccelChangedId = 0; 
+        this._cycleBackwardAccelChangedId = 0; 
+        this._zoneGapChangedId = 0; 
+        this._tabBarHeightChangedId = 0; 
+        this._tabFontSizeChangedId = 0; 
+        // For completeness if dynamic changes are needed 
 
         // IDs for new tab settings signals
-        this._tabIconSizeChangedId = 0; // [cite: 20]
-        this._tabCornerRadiusChangedId = 0; // [cite: 21]
-        this._tabCloseButtonIconSizeChangedId = 0; // [cite: 21]
-        this._tabSpacingChangedId = 0; // [cite: 21]
-        this._tabMinWidthChangedId = 0; // [cite: 21]
-        this._tabMaxWidthChangedId = 0; // [cite: 21]
+        this._tabIconSizeChangedId = 0; 
+        this._tabCornerRadiusChangedId = 0; 
+        this._tabCloseButtonIconSizeChangedId = 0; 
+        this._tabSpacingChangedId = 0; 
+        this._tabMinWidthChangedId = 0; 
+        this._tabMaxWidthChangedId = 0; 
 
-        this._sessionProxy = null; // [cite: 21]
-        this._sessionResumedSignalId = 0; // [cite: 22]
-        this._snapOnResumeTimeoutId = 0; // [cite: 22]
+        this._sessionProxy = null; 
+        this._sessionResumedSignalId = 0; 
+        this._snapOnResumeTimeoutId = 0; 
     }
 
     _performDelayedSnap(reason = "unknown change") {
-        if (this._settingsManager && this._settingsManager.isZoningEnabled() && this._windowManager) { // [cite: 22]
-            log(`Re-snapping windows due to: ${reason}`); // [cite: 22]
-            this._windowManager.snapAllWindowsToZones(); // [cite: 23]
+        if (this._settingsManager && this._settingsManager.isZoningEnabled() && this._windowManager) { 
+            log(`Re-snapping windows due to: ${reason}`); 
+            this._windowManager.snapAllWindowsToZones(); 
         }
     }
 
     _updateAllTabsAppearance(reason = "unknown tab setting change") {
-        log(`Updating tab appearances due to: ${reason}`); // [cite: 23]
-        if (this._settingsManager && this._settingsManager.isZoningEnabled() && this._windowManager) { // [cite: 24]
-            this._windowManager.updateAllTabAppearances(); // [cite: 24]
+        log(`Updating tab appearances due to: ${reason}`); 
+        if (this._settingsManager && this._settingsManager.isZoningEnabled() && this._windowManager) { 
+            this._windowManager.updateAllTabAppearances(); 
         }
     }
 
     enable() {
-        log('Enabling…'); // [cite: 25]
-        this._settingsManager = new SettingsManager(this.getSettings(), this.path); // [cite: 26]
-        this._highlightManager = new HighlightManager(this._settingsManager); // [cite: 26]
-        this._windowManager = new WindowManager(this._settingsManager, this._highlightManager); // [cite: 26]
-        this._indicator = new Indicator(this.uuid, this._settingsManager, this); // [cite: 26]
-        this._windowManager.connectSignals(); // [cite: 27]
-        if (this._settingsManager.isZoningEnabled()) { // [cite: 27]
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 300, () => { // [cite: 27]
-                if (this._settingsManager && this._settingsManager.isZoningEnabled() && this._windowManager) { // [cite: 27]
-                    log('Performing initial snapAllWindowsToZones after delay...'); // [cite: 27]
-                    this._performDelayedSnap("initial enable"); // [cite: 27]
+        log('Enabling…'); 
+        this._settingsManager = new SettingsManager(this.getSettings(), this.path); 
+        this._highlightManager = new HighlightManager(this._settingsManager); 
+        this._windowManager = new WindowManager(this._settingsManager, this._highlightManager); 
+        this._indicator = new Indicator(this.uuid, this._settingsManager, this); 
+        this._windowManager.connectSignals(); 
+        if (this._settingsManager.isZoningEnabled()) { 
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 300, () => { 
+                if (this._settingsManager && this._settingsManager.isZoningEnabled() && this._windowManager) { 
+                    log('Performing initial snapAllWindowsToZones after delay...'); 
+                    this._performDelayedSnap("initial enable"); 
                 }
-                return GLib.SOURCE_REMOVE; // [cite: 28]
+                return GLib.SOURCE_REMOVE; 
             });
         }
 
-        this._zoningChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 29]
-            `changed::${ENABLE_ZONING_KEY}`, // [cite: 29]
+        this._zoningChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${ENABLE_ZONING_KEY}`, 
             () => {
-                this._windowManager.connectSignals(); // [cite: 29]
-                if (this._settingsManager.isZoningEnabled()) { // [cite: 29]
+                this._windowManager.connectSignals(); 
+                if (this._settingsManager.isZoningEnabled()) { 
                     // Perform a full refresh including potential splits
-                    if (this._windowManager) this._windowManager.refreshZonesAndLayout(); // [cite: 30]
-                } else { // [cite: 30]
+                    if (this._windowManager) this._windowManager.refreshZonesAndLayout(); 
+                } else { 
                     if (this._windowManager) this._windowManager.cleanupWindowProperties(); // Clean up if disabled
                 }
-                this._indicator.updateToggleState(); // [cite: 30]
+                this._indicator.updateToggleState(); 
             }
         );
-        this._zoneGapChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 31]
-            `changed::${ZONE_GAP_SIZE_KEY}`, // [cite: 31]
+        this._zoneGapChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${ZONE_GAP_SIZE_KEY}`, 
             () => {
-                log('Zone gap size setting changed; re-snapping windows...'); // [cite: 31]
-                if (this._windowManager) this._windowManager._rebuildAndResnapAll(); // Full rebuild for gap changes // [cite: 31]
+                log('Zone gap size setting changed; re-snapping windows...'); 
+                if (this._windowManager) this._windowManager._rebuildAndResnapAll(); // Full rebuild for gap changes 
             }
         );
-        this._tabBarHeightChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 32]
-            `changed::${TAB_BAR_HEIGHT_KEY}`, // [cite: 32]
+        this._tabBarHeightChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${TAB_BAR_HEIGHT_KEY}`, 
             () => {
-                log('Tab bar height setting changed; re-snapping windows and updating tabs...'); // [cite: 32]
+                log('Tab bar height setting changed; re-snapping windows and updating tabs...'); 
                 // Snapping also updates tab bar position/size, a full rebuild is safer
-                if (this._windowManager) this._windowManager._rebuildAndResnapAll(); // [cite: 32]
-                this._updateAllTabsAppearance("tab bar height change"); // [cite: 32]
+                if (this._windowManager) this._windowManager._rebuildAndResnapAll(); 
+                this._updateAllTabsAppearance("tab bar height change"); 
             }
         );
-        this._tabFontSizeChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 34]
-            `changed::${TAB_FONT_SIZE_KEY}`, // [cite: 34]
+        this._tabFontSizeChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${TAB_FONT_SIZE_KEY}`, 
             () => {
-                log('Tab font size setting changed; updating tabs...'); // [cite: 34]
-                this._updateAllTabsAppearance("tab font size change"); // [cite: 34]
+                log('Tab font size setting changed; updating tabs...'); 
+                this._updateAllTabsAppearance("tab font size change"); 
             }
         );
-        // Connect signals for new tab settings // [cite: 35]
-        this._tabIconSizeChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 35]
-            `changed::${TAB_ICON_SIZE_KEY}`, () => this._updateAllTabsAppearance("tab icon size change") // [cite: 35]
+        // Connect signals for new tab settings 
+        this._tabIconSizeChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${TAB_ICON_SIZE_KEY}`, () => this._updateAllTabsAppearance("tab icon size change") 
         );
-        this._tabCornerRadiusChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 36]
-            `changed::${TAB_CORNER_RADIUS_KEY}`, () => this._updateAllTabsAppearance("tab corner radius change") // [cite: 36]
+        this._tabCornerRadiusChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${TAB_CORNER_RADIUS_KEY}`, () => this._updateAllTabsAppearance("tab corner radius change") 
         );
-        this._tabCloseButtonIconSizeChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 37]
-            `changed::${TAB_CLOSE_BUTTON_ICON_SIZE_KEY}`, () => this._updateAllTabsAppearance("tab close button icon size change") // [cite: 37]
+        this._tabCloseButtonIconSizeChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${TAB_CLOSE_BUTTON_ICON_SIZE_KEY}`, () => this._updateAllTabsAppearance("tab close button icon size change") 
         );
-        this._tabSpacingChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 38]
-            `changed::${TAB_SPACING_KEY}`, () => this._updateAllTabsAppearance("tab spacing change") // [cite: 38]
+        this._tabSpacingChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${TAB_SPACING_KEY}`, () => this._updateAllTabsAppearance("tab spacing change") 
         );
-        this._tabMinWidthChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 39]
-            `changed::${TAB_MIN_WIDTH_KEY}`, () => this._updateAllTabsAppearance("tab min width change") // [cite: 39]
+        this._tabMinWidthChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${TAB_MIN_WIDTH_KEY}`, () => this._updateAllTabsAppearance("tab min width change") 
         );
-        this._tabMaxWidthChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 40]
-            `changed::${TAB_MAX_WIDTH_KEY}`, () => this._updateAllTabsAppearance("tab max width change") // [cite: 40]
+        this._tabMaxWidthChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${TAB_MAX_WIDTH_KEY}`, () => this._updateAllTabsAppearance("tab max width change") 
         );
-        if (Main.layoutManager) { // [cite: 41]
-            this._monitorsChangedId = Main.layoutManager.connect( // [cite: 41]
-                'monitors-changed', // [cite: 41]
+        if (Main.layoutManager) { 
+            this._monitorsChangedId = Main.layoutManager.connect( 
+                'monitors-changed', 
                 () => {
-                    log('Monitors changed event detected.'); // [cite: 41]
-                    if (this._highlightManager) this._highlightManager.reinitHighlighters(); // [cite: 41]
+                    log('Monitors changed event detected.'); 
+                    if (this._highlightManager) this._highlightManager.reinitHighlighters(); 
 
-                    if (this._snapOnMonitorsChangedTimeoutId > 0) { // [cite: 42]
-                        GLib.Source.remove(this._snapOnMonitorsChangedTimeoutId); // [cite: 42]
+                    if (this._snapOnMonitorsChangedTimeoutId > 0) { 
+                        GLib.Source.remove(this._snapOnMonitorsChangedTimeoutId); 
                     }
-                    this._snapOnMonitorsChangedTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 750, () => { // [cite: 42]
-                        log('Processing monitors changed event (delayed).'); // [cite: 43]
-                        if (this._windowManager) this._windowManager.refreshZonesAndLayout(); // Full refresh on monitor change // [cite: 43]
-                        this._snapOnMonitorsChangedTimeoutId = 0; // [cite: 43]
-                        return GLib.SOURCE_REMOVE; // [cite: 43]
+                    this._snapOnMonitorsChangedTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 750, () => { 
+                        log('Processing monitors changed event (delayed).'); 
+                        if (this._windowManager) this._windowManager.refreshZonesAndLayout(); // Full refresh on monitor change 
+                        this._snapOnMonitorsChangedTimeoutId = 0; 
+                        return GLib.SOURCE_REMOVE; 
                     });
                 }
             );
         }
 
-        try { // [cite: 45]
-            this._sessionProxy = new SessionManagerProxy( // [cite: 45]
-                Gio.DBus.session, // [cite: 45]
-                'org.gnome.SessionManager', // [cite: 45]
-                '/org/gnome/SessionManager', // [cite: 45]
-                (proxy, error) => { // [cite: 45]
-                    if (error) { // [cite: 46]
-                        log(`Error creating SessionManager proxy: ${error.message}`); // [cite: 46]
-                        this._sessionProxy = null; // [cite: 46]
-                        return; // [cite: 46]
+        try { 
+            this._sessionProxy = new SessionManagerProxy( 
+                Gio.DBus.session, 
+                'org.gnome.SessionManager', 
+                '/org/gnome/SessionManager', 
+                (proxy, error) => { 
+                    if (error) { 
+                        log(`Error creating SessionManager proxy: ${error.message}`); 
+                        this._sessionProxy = null; 
+                        return; 
                     }
-                    if (!this._sessionProxy) { // [cite: 47]
-                        log('SessionManager proxy initialization failed silently.'); // [cite: 47]
-                        return; // [cite: 47]
+                    if (!this._sessionProxy) { 
+                        log('SessionManager proxy initialization failed silently.'); 
+                        return; 
                     }
-                    this._sessionResumedSignalId = this._sessionProxy.connectSignal('Resumed', () => { // [cite: 48]
-                        log('System Resumed signal received.'); // [cite: 48]
-                        if (this._snapOnResumeTimeoutId > 0) { // [cite: 48]
-                            GLib.Source.remove(this._snapOnResumeTimeoutId); // [cite: 49]
+                    this._sessionResumedSignalId = this._sessionProxy.connectSignal('Resumed', () => { 
+                        log('System Resumed signal received.'); 
+                        if (this._snapOnResumeTimeoutId > 0) { 
+                            GLib.Source.remove(this._snapOnResumeTimeoutId); 
                         }
-                        this._snapOnResumeTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 1000, () => { // [cite: 49]
-                            log('Processing Resumed signal (delayed snap).'); // [cite: 49]
-                            if (this._windowManager) this._windowManager.refreshZonesAndLayout(); // Full refresh on resume // [cite: 50]
-                            this._snapOnResumeTimeoutId = 0; // [cite: 50]
-                            return GLib.SOURCE_REMOVE; // [cite: 50]
+                        this._snapOnResumeTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 1000, () => { 
+                            log('Processing Resumed signal (delayed snap).'); 
+                            if (this._windowManager) this._windowManager.refreshZonesAndLayout(); // Full refresh on resume 
+                            this._snapOnResumeTimeoutId = 0; 
+                            return GLib.SOURCE_REMOVE; 
                         });
                     });
-                    log('Connected to SessionManager Resumed signal.'); // [cite: 50]
+                    log('Connected to SessionManager Resumed signal.'); 
                 }
             );
-        } catch (e) { // [cite: 52]
-            log(`Failed to create SessionManager D-Bus proxy: ${e}`); // [cite: 52]
-            this._sessionProxy = null; // [cite: 53]
+        } catch (e) { 
+            log(`Failed to create SessionManager D-Bus proxy: ${e}`); 
+            this._sessionProxy = null; 
         }
 
-        this._addCycleKeybinding(); // [cite: 53]
-        this._addCycleBackwardKeybinding(); // [cite: 53]
-        this._cycleAccelChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 54]
-            `changed::${CYCLE_ACCELERATOR_KEY}`, // [cite: 54]
+        this._addCycleKeybinding(); 
+        this._addCycleBackwardKeybinding(); 
+        this._cycleAccelChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${CYCLE_ACCELERATOR_KEY}`, 
             () => {
-                log('Cycle accelerator changed; rebinding…'); // [cite: 54]
-                Main.wm.removeKeybinding(CYCLE_ACCELERATOR_KEY); // [cite: 54]
-                this._addCycleKeybinding(); // [cite: 54]
+                log('Cycle accelerator changed; rebinding…'); 
+                Main.wm.removeKeybinding(CYCLE_ACCELERATOR_KEY); 
+                this._addCycleKeybinding(); 
             }
         );
-        this._cycleBackwardAccelChangedId = this._settingsManager.getGSettingObject().connect( // [cite: 55]
-            `changed::${CYCLE_BACKWARD_ACCELERATOR_KEY}`, // [cite: 55]
+        this._cycleBackwardAccelChangedId = this._settingsManager.getGSettingObject().connect( 
+            `changed::${CYCLE_BACKWARD_ACCELERATOR_KEY}`, 
             () => {
-                log('Backward cycle accelerator changed; rebinding…'); // [cite: 55]
-                Main.wm.removeKeybinding(CYCLE_BACKWARD_ACCELERATOR_KEY); // [cite: 55]
-                this._addCycleBackwardKeybinding(); // [cite: 55]
+                log('Backward cycle accelerator changed; rebinding…'); 
+                Main.wm.removeKeybinding(CYCLE_BACKWARD_ACCELERATOR_KEY); 
+                this._addCycleBackwardKeybinding(); 
             }
         );
 
-        log('Enabled.'); // [cite: 56]
+        log('Enabled.'); 
     }
 
     disable() {
-        log('Disabling…'); // [cite: 56]
-        if (this._snapOnMonitorsChangedTimeoutId > 0) { // [cite: 57]
-            GLib.Source.remove(this._snapOnMonitorsChangedTimeoutId); // [cite: 57]
-            this._snapOnMonitorsChangedTimeoutId = 0; // [cite: 57]
+        log('Disabling…'); 
+        if (this._snapOnMonitorsChangedTimeoutId > 0) { 
+            GLib.Source.remove(this._snapOnMonitorsChangedTimeoutId); 
+            this._snapOnMonitorsChangedTimeoutId = 0; 
         }
-        if (this._snapOnResumeTimeoutId > 0) { // [cite: 58]
-            GLib.Source.remove(this._snapOnResumeTimeoutId); // [cite: 58]
-            this._snapOnResumeTimeoutId = 0; // [cite: 59]
+        if (this._snapOnResumeTimeoutId > 0) { 
+            GLib.Source.remove(this._snapOnResumeTimeoutId); 
+            this._snapOnResumeTimeoutId = 0; 
         }
 
-        if (this._sessionProxy && this._sessionResumedSignalId > 0) { // [cite: 59]
-            try { // [cite: 59]
-                this._sessionProxy.disconnectSignal(this._sessionResumedSignalId); // [cite: 59]
-            } catch (e) { // [cite: 60]
-                log(`Error disconnecting SessionManager Resumed signal: ${e}`); // [cite: 60]
+        if (this._sessionProxy && this._sessionResumedSignalId > 0) { 
+            try { 
+                this._sessionProxy.disconnectSignal(this._sessionResumedSignalId); 
+            } catch (e) { 
+                log(`Error disconnecting SessionManager Resumed signal: ${e}`); 
             }
-            this._sessionResumedSignalId = 0; // [cite: 61]
+            this._sessionResumedSignalId = 0; 
         }
-        this._sessionProxy = null; // [cite: 62]
-        if (this._monitorsChangedId > 0 && Main.layoutManager) { // [cite: 63]
-            Main.layoutManager.disconnect(this._monitorsChangedId); // [cite: 63]
-            this._monitorsChangedId = 0; // [cite: 64]
+        this._sessionProxy = null; 
+        if (this._monitorsChangedId > 0 && Main.layoutManager) { 
+            Main.layoutManager.disconnect(this._monitorsChangedId); 
+            this._monitorsChangedId = 0; 
         }
-        const gsettingsObj = this._settingsManager.getGSettingObject(); // [cite: 64]
-        if (this._zoningChangedId > 0) { // [cite: 65]
-            gsettingsObj.disconnect(this._zoningChangedId); // [cite: 65]
-            this._zoningChangedId = 0; // [cite: 65]
+        const gsettingsObj = this._settingsManager.getGSettingObject(); 
+        if (this._zoningChangedId > 0) { 
+            gsettingsObj.disconnect(this._zoningChangedId); 
+            this._zoningChangedId = 0; 
         }
-        if (this._cycleAccelChangedId > 0) { // [cite: 66]
-            gsettingsObj.disconnect(this._cycleAccelChangedId); // [cite: 66]
-            this._cycleAccelChangedId = 0; // [cite: 67]
+        if (this._cycleAccelChangedId > 0) { 
+            gsettingsObj.disconnect(this._cycleAccelChangedId); 
+            this._cycleAccelChangedId = 0; 
         }
-        if (this._cycleBackwardAccelChangedId > 0) { // [cite: 67]
-            gsettingsObj.disconnect(this._cycleBackwardAccelChangedId); // [cite: 67]
-            this._cycleBackwardAccelChangedId = 0; // [cite: 68]
+        if (this._cycleBackwardAccelChangedId > 0) { 
+            gsettingsObj.disconnect(this._cycleBackwardAccelChangedId); 
+            this._cycleBackwardAccelChangedId = 0; 
         }
-        if (this._zoneGapChangedId > 0) { // [cite: 68]
-            gsettingsObj.disconnect(this._zoneGapChangedId); // [cite: 68]
-            this._zoneGapChangedId = 0; // [cite: 69]
+        if (this._zoneGapChangedId > 0) { 
+            gsettingsObj.disconnect(this._zoneGapChangedId); 
+            this._zoneGapChangedId = 0; 
         }
-        if (this._tabBarHeightChangedId > 0) { // [cite: 69]
-            gsettingsObj.disconnect(this._tabBarHeightChangedId); // [cite: 69]
-            this._tabBarHeightChangedId = 0; // [cite: 70]
+        if (this._tabBarHeightChangedId > 0) { 
+            gsettingsObj.disconnect(this._tabBarHeightChangedId); 
+            this._tabBarHeightChangedId = 0; 
         }
-        if (this._tabFontSizeChangedId > 0) { // [cite: 70]
-            gsettingsObj.disconnect(this._tabFontSizeChangedId); // [cite: 70]
-            this._tabFontSizeChangedId = 0; // [cite: 71]
+        if (this._tabFontSizeChangedId > 0) { 
+            gsettingsObj.disconnect(this._tabFontSizeChangedId); 
+            this._tabFontSizeChangedId = 0; 
         }
 
         // Disconnect new tab settings signals
-        if (this._tabIconSizeChangedId > 0) { // [cite: 71]
-            gsettingsObj.disconnect(this._tabIconSizeChangedId); // [cite: 71]
-            this._tabIconSizeChangedId = 0; // [cite: 72]
+        if (this._tabIconSizeChangedId > 0) { 
+            gsettingsObj.disconnect(this._tabIconSizeChangedId); 
+            this._tabIconSizeChangedId = 0; 
         }
-        if (this._tabCornerRadiusChangedId > 0) { // [cite: 72]
-            gsettingsObj.disconnect(this._tabCornerRadiusChangedId); // [cite: 72]
-            this._tabCornerRadiusChangedId = 0; // [cite: 73]
+        if (this._tabCornerRadiusChangedId > 0) { 
+            gsettingsObj.disconnect(this._tabCornerRadiusChangedId); 
+            this._tabCornerRadiusChangedId = 0; 
         }
-        if (this._tabCloseButtonIconSizeChangedId > 0) { // [cite: 73]
-            gsettingsObj.disconnect(this._tabCloseButtonIconSizeChangedId); // [cite: 73]
-            this._tabCloseButtonIconSizeChangedId = 0; // [cite: 74]
+        if (this._tabCloseButtonIconSizeChangedId > 0) { 
+            gsettingsObj.disconnect(this._tabCloseButtonIconSizeChangedId); 
+            this._tabCloseButtonIconSizeChangedId = 0; 
         }
-        if (this._tabSpacingChangedId > 0) { // [cite: 74]
-            gsettingsObj.disconnect(this._tabSpacingChangedId); // [cite: 74]
-            this._tabSpacingChangedId = 0; // [cite: 75]
+        if (this._tabSpacingChangedId > 0) { 
+            gsettingsObj.disconnect(this._tabSpacingChangedId); 
+            this._tabSpacingChangedId = 0; 
         }
-        if (this._tabMinWidthChangedId > 0) { // [cite: 75]
-            gsettingsObj.disconnect(this._tabMinWidthChangedId); // [cite: 75]
-            this._tabMinWidthChangedId = 0; // [cite: 76]
+        if (this._tabMinWidthChangedId > 0) { 
+            gsettingsObj.disconnect(this._tabMinWidthChangedId); 
+            this._tabMinWidthChangedId = 0; 
         }
-        if (this._tabMaxWidthChangedId > 0) { // [cite: 76]
-            gsettingsObj.disconnect(this._tabMaxWidthChangedId); // [cite: 76]
-            this._tabMaxWidthChangedId = 0; // [cite: 77]
-        }
-
-        Main.wm.removeKeybinding(CYCLE_ACCELERATOR_KEY); // [cite: 77]
-        Main.wm.removeKeybinding(CYCLE_BACKWARD_ACCELERATOR_KEY); // [cite: 77]
-        if (this._windowManager) { // [cite: 78]
-            this._windowManager.cleanupWindowProperties(); // [cite: 78]
-            this._windowManager.destroy(); // [cite: 78]
-            this._windowManager = null; // [cite: 78]
-        }
-        if (this._highlightManager) { // [cite: 79]
-            this._highlightManager.destroy(); // [cite: 79]
-            this._highlightManager = null; // [cite: 80]
-        }
-        if (this._indicator) { // [cite: 80]
-            this._indicator.destroy(); // [cite: 80]
-            this._indicator = null; // [cite: 81]
-        }
-        if (this._settingsManager) { // [cite: 81]
-            this._settingsManager.destroy(); // [cite: 81]
-            this._settingsManager = null; // [cite: 82]
+        if (this._tabMaxWidthChangedId > 0) { 
+            gsettingsObj.disconnect(this._tabMaxWidthChangedId); 
+            this._tabMaxWidthChangedId = 0; 
         }
 
-        log('Disabled.'); // [cite: 82]
+        Main.wm.removeKeybinding(CYCLE_ACCELERATOR_KEY); 
+        Main.wm.removeKeybinding(CYCLE_BACKWARD_ACCELERATOR_KEY); 
+        if (this._windowManager) { 
+            this._windowManager.cleanupWindowProperties(); 
+            this._windowManager.destroy(); 
+            this._windowManager = null; 
+        }
+        if (this._highlightManager) { 
+            this._highlightManager.destroy(); 
+            this._highlightManager = null; 
+        }
+        if (this._indicator) { 
+            this._indicator.destroy(); 
+            this._indicator = null; 
+        }
+        if (this._settingsManager) { 
+            this._settingsManager.destroy(); 
+            this._settingsManager = null; 
+        }
+
+        log('Disabled.'); 
     }
 
     _addCycleKeybinding() {
-        const accel = this._settingsManager.getGSettingObject().get_strv(CYCLE_ACCELERATOR_KEY)[0]; // [cite: 83]
-        log(`Binding cycle shortcut: ${accel}`); // [cite: 84]
+        const accel = this._settingsManager.getGSettingObject().get_strv(CYCLE_ACCELERATOR_KEY)[0]; 
+        log(`Binding cycle shortcut: ${accel}`); 
 
-        Main.wm.addKeybinding( // [cite: 84]
-            CYCLE_ACCELERATOR_KEY, // [cite: 84]
-            this._settingsManager.getGSettingObject(), // [cite: 84]
-            Meta.KeyBindingFlags.NONE, // [cite: 84]
-            Shell.ActionMode.ALL, // [cite: 84]
+        Main.wm.addKeybinding( 
+            CYCLE_ACCELERATOR_KEY, 
+            this._settingsManager.getGSettingObject(), 
+            Meta.KeyBindingFlags.NONE, 
+            Shell.ActionMode.ALL, 
             () => {
-                log('🏷️ Cycle shortcut pressed!'); // [cite: 84]
-                if (this._windowManager) this._windowManager.cycleWindowsInCurrentZone(); // [cite: 85]
+                log('🏷️ Cycle shortcut pressed!'); 
+                if (this._windowManager) this._windowManager.cycleWindowsInCurrentZone(); 
             }
         );
     }
 
     _addCycleBackwardKeybinding() {
-        const accel = this._settingsManager.getGSettingObject().get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY)[0]; // [cite: 86]
-        log(`Binding backward cycle shortcut: ${accel}`); // [cite: 87]
+        const accel = this._settingsManager.getGSettingObject().get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY)[0]; 
+        log(`Binding backward cycle shortcut: ${accel}`); 
 
-        Main.wm.addKeybinding( // [cite: 87]
-            CYCLE_BACKWARD_ACCELERATOR_KEY, // [cite: 87]
-            this._settingsManager.getGSettingObject(), // [cite: 87]
-            Meta.KeyBindingFlags.NONE, // [cite: 87]
-            Shell.ActionMode.ALL, // [cite: 87]
+        Main.wm.addKeybinding( 
+            CYCLE_BACKWARD_ACCELERATOR_KEY, 
+            this._settingsManager.getGSettingObject(), 
+            Meta.KeyBindingFlags.NONE, 
+            Shell.ActionMode.ALL, 
             () => {
-                log('🏷️ Backward cycle shortcut pressed!'); // [cite: 87]
-                if (this._windowManager) this._windowManager.cycleWindowsInCurrentZoneBackward(); // [cite: 88]
+                log('🏷️ Backward cycle shortcut pressed!'); 
+                if (this._windowManager) this._windowManager.cycleWindowsInCurrentZoneBackward(); 
             }
         );
     }

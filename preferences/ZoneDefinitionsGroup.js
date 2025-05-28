@@ -1,11 +1,11 @@
 // ./preferences/ZoneDefinitionsGroup.js
-import Adw from 'gi://Adw'; // [cite: 511]
-import Gtk from 'gi://Gtk'; // [cite: 512]
-import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; // [cite: 513]
+import Adw from 'gi://Adw'; 
+import Gtk from 'gi://Gtk'; 
+import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; 
 import { ZoneEditorGrid } from './ZoneEditorGrid.js'; // Assuming ZoneEditorGrid.js is in the same directory
 
-const ZONE_SETTINGS_KEY = 'zones'; // [cite: 514]
-const log = msg => console.log(`[AutoZonerPrefs.ZoneDefs] ${msg}`); // [cite: 531]
+const ZONE_SETTINGS_KEY = 'zones'; 
+const log = msg => console.log(`[AutoZonerPrefs.ZoneDefs] ${msg}`); 
 
 export class ZoneDefinitionsGroup {
     constructor(settings, monitorCount, window) {
@@ -13,19 +13,19 @@ export class ZoneDefinitionsGroup {
         this._monitorCount = monitorCount;
         this._window = window; // Reference to the main preferences window for dialogs
 
-        this.group = new Adw.PreferencesGroup({ // [cite: 608]
-            title: _('Zone Definitions'), // [cite: 608]
-            description: _('Define screen areas where windows will tile automatically.') // [cite: 608]
+        this.group = new Adw.PreferencesGroup({ 
+            title: _('Zone Definitions'), 
+            description: _('Define screen areas where windows will tile automatically.') 
         });
 
-        this._addButtonRow = new Adw.ActionRow(); // [cite: 609]
-        const addButton = new Gtk.Button({ // [cite: 609]
-            label: _('Add New Zone'), // [cite: 609]
-            halign: Gtk.Align.CENTER, // [cite: 609]
-            css_classes: ['suggested-action'] // [cite: 609]
+        this._addButtonRow = new Adw.ActionRow(); 
+        const addButton = new Gtk.Button({ 
+            label: _('Add New Zone'), 
+            halign: Gtk.Align.CENTER, 
+            css_classes: ['suggested-action'] 
         });
-        addButton.connect('clicked', () => this._addZone()); // [cite: 610]
-        this._addButtonRow.set_child(addButton); // [cite: 610]
+        addButton.connect('clicked', () => this._addZone()); 
+        this._addButtonRow.set_child(addButton); 
 
         this._loadZonesToUI();
     }
@@ -36,32 +36,32 @@ export class ZoneDefinitionsGroup {
 
     _loadZonesToUI() {
         // Clear previous expanders except the add button row
-        let child = this.group.get_first_child(); // [cite: 615]
-        while (child) { // [cite: 616]
-            const next = child.get_next_sibling(); // [cite: 616]
-            if (child !== this._addButtonRow && child instanceof Adw.ExpanderRow) { // [cite: 616, 617]
-                 this.group.remove(child); // [cite: 617]
+        let child = this.group.get_first_child(); 
+        while (child) { 
+            const next = child.get_next_sibling(); 
+            if (child !== this._addButtonRow && child instanceof Adw.ExpanderRow) { 
+                 this.group.remove(child); 
             }
-            child = next; // [cite: 618]
+            child = next; 
         }
         // Ensure add button row is removed if it exists, to re-add it at the end
-        if (this._addButtonRow.get_parent() === this.group) { // [cite: 619]
-            this.group.remove(this._addButtonRow); // [cite: 619]
+        if (this._addButtonRow.get_parent() === this.group) { 
+            this.group.remove(this._addButtonRow); 
         }
 
 
-        let zones = []; // [cite: 620]
+        let zones = []; 
         try {
-            zones = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)); // [cite: 621]
-            if (!Array.isArray(zones)) zones = []; // [cite: 622]
+            zones = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)); 
+            if (!Array.isArray(zones)) zones = []; 
         } catch (e) {
-            log(`Error parsing zones JSON: ${e}`); // [cite: 622]
-            zones = []; // [cite: 623]
+            log(`Error parsing zones JSON: ${e}`); 
+            zones = []; 
         }
 
-        zones.forEach(zoneData => this._createAndAddZoneExpander(zoneData)); // [cite: 623]
+        zones.forEach(zoneData => this._createAndAddZoneExpander(zoneData)); 
         
-        this.group.add(this._addButtonRow); // Re-add the add button row [cite: 624]
+        this.group.add(this._addButtonRow); // Re-add the add button row
     }
 
     _createAndAddZoneExpander(zoneData) {
@@ -107,42 +107,41 @@ export class ZoneDefinitionsGroup {
             dialog.present();
         });
         
-        // CORRECTED LINE:
         // Add the new expander row. Ordering is handled by _loadZonesToUI
         // (which removes _addButtonRow and adds it back after all zones).
         this.group.add(expanderRow);
     }
 
     _addZone() {
-        let current = []; // [cite: 634]
+        let current = []; 
         try {
-            current = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)) || []; // [cite: 635]
-        } catch {} // [cite: 636]
-        const idx = current.length + 1; // [cite: 636]
-        const newZone = { // [cite: 637]
-            monitorIndex: 0, // Default to first monitor [cite: 637]
-            name:         _('New Zone %d').format(idx), // [cite: 637]
-            x: 0, y: 0, width: 600, height: 400 // Some default size [cite: 637]
+            current = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)) || []; 
+        } catch {} 
+        const idx = current.length + 1; 
+        const newZone = { 
+            monitorIndex: 0, // Default to first monitor
+            name:         _('New Zone %d').format(idx), 
+            x: 0, y: 0, width: 600, height: 400 // Some default size
         };
-        this._createAndAddZoneExpander(newZone); // [cite: 638]
-        this._saveZones(); // [cite: 638]
+        this._createAndAddZoneExpander(newZone); 
+        this._saveZones(); 
     }
 
     _saveZones() {
-        const zones = []; // [cite: 638]
-        let child = this.group.get_first_child(); // [cite: 639]
-        while (child) { // [cite: 639]
-            if (child instanceof Adw.ExpanderRow && child.get_n_rows() > 0) { // [cite: 639]
-                const firstRowContent = child.get_row_at_index(0); // [cite: 639]
-                if (firstRowContent instanceof ZoneEditorGrid) { // [cite: 640]
-                    zones.push(firstRowContent.get_zone_data()); // [cite: 640]
+        const zones = []; 
+        let child = this.group.get_first_child(); 
+        while (child) { 
+            if (child instanceof Adw.ExpanderRow && child.get_n_rows() > 0) { 
+                const firstRowContent = child.get_row_at_index(0); 
+                if (firstRowContent instanceof ZoneEditorGrid) { 
+                    zones.push(firstRowContent.get_zone_data()); 
                 } else {
-                    log('Warning: Could not find ZoneEditorGrid in ExpanderRow to save zone data.'); // [cite: 643]
+                    log('Warning: Could not find ZoneEditorGrid in ExpanderRow to save zone data.'); 
                 }
             }
-            child = child.get_next_sibling(); // [cite: 644]
+            child = child.get_next_sibling(); 
         }
-        this._settings.set_string(ZONE_SETTINGS_KEY, JSON.stringify(zones)); // [cite: 645]
-        log(`Saved ${zones.length} zones.`); // [cite: 645]
+        this._settings.set_string(ZONE_SETTINGS_KEY, JSON.stringify(zones)); 
+        log(`Saved ${zones.length} zones.`); 
     }
 }

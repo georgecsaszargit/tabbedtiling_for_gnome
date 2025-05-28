@@ -2,24 +2,24 @@
   {
     "monitorIndex": 0,
     "name": "Left",
-    "x": 0,
-    "y": 0,
+    "x": 62,
+    "y": 33,
     "width": 1800,
     "height": 1407
   },
   {
     "monitorIndex": 0,
     "name": "center",
-    "x": 1800,
-    "y": 0,
+    "x": 1862,
+    "y": 33,
     "width": 1800,
     "height": 1407
   },
    {
     "monitorIndex": 0,
     "name": "Right",
-    "x": 3600,
-    "y": 0,
+    "x": 3662,
+    "y": 33,
     "width": 1459,
     "height": 1407
   }

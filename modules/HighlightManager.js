@@ -54,11 +54,11 @@ export class HighlightManager {
         log("Destroyed all highlighters.");
     }
 
-    _getMonitorWorkArea(monitorIndex) {
+    _getMonitorGeometry(monitorIndex) { 
         if (monitorIndex < 0 || monitorIndex >= Main.layoutManager.monitors.length) {
-            return Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+            return Main.layoutManager.monitors[Main.layoutManager.primaryIndex]; // Return full monitor geometry for primary
         }
-        return Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+        return Main.layoutManager.monitors[monitorIndex]; // Return full monitor geometry
     }
 
     _updateHighlightOnDrag() {
@@ -109,7 +109,7 @@ export class HighlightManager {
                 }
 
                 if (currentHighlighterOnPointerMonitor) {
-                    const workArea = this._getMonitorWorkArea(pointerMonitorIndex);
+                    const workArea = this._getMonitorGeometry(pointerMonitorIndex);
                     const absoluteZoneRect = {
                         x: workArea.x + hoveredZone.x, y: workArea.y + hoveredZone.y,
                         width: hoveredZone.width, height: hoveredZone.height

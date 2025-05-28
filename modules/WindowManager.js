@@ -3,52 +3,52 @@
 import Meta from 'gi://Meta';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
-import Mtk from 'gi://Mtk'; //
+import Mtk from 'gi://Mtk'; 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import Shell from 'gi://Shell'; // Added for WindowTracker
 
-import { ZoneDetector } from './ZoneDetector.js'; //
-import { TabBar } from './TabBar.js'; //
-const log = (context, msg) => console.log(`[AutoZoner.WindowManager.${context}] ${msg}`); //
+import { ZoneDetector } from './ZoneDetector.js'; 
+import { TabBar } from './TabBar.js'; 
+const log = (context, msg) => console.log(`[AutoZoner.WindowManager.${context}] ${msg}`); 
 const ALL_RESIZING_OPS = Meta.GrabOp.RESIZING_N | Meta.GrabOp.RESIZING_S |
     Meta.GrabOp.RESIZING_E | Meta.GrabOp.RESIZING_W |
-    Meta.GrabOp.RESIZING_NW | Meta.GrabOp.RESIZING_NE | //
+    Meta.GrabOp.RESIZING_NW | Meta.GrabOp.RESIZING_NE | 
     Meta.GrabOp.RESIZING_SW | Meta.GrabOp.RESIZING_SE |
-    Meta.GrabOp.KEYBOARD_RESIZING_N | Meta.GrabOp.KEYBOARD_RESIZING_S | //
+    Meta.GrabOp.KEYBOARD_RESIZING_N | Meta.GrabOp.KEYBOARD_RESIZING_S | 
     Meta.GrabOp.KEYBOARD_RESIZING_E | Meta.GrabOp.KEYBOARD_RESIZING_W |
-    Meta.GrabOp.KEYBOARD_RESIZING_NW | Meta.GrabOp.KEYBOARD_RESIZING_NE | //
-    Meta.GrabOp.KEYBOARD_RESIZING_SW | Meta.GrabOp.KEYBOARD_RESIZING_SE; //
+    Meta.GrabOp.KEYBOARD_RESIZING_NW | Meta.GrabOp.KEYBOARD_RESIZING_NE | 
+    Meta.GrabOp.KEYBOARD_RESIZING_SW | Meta.GrabOp.KEYBOARD_RESIZING_SE; 
 
 export class WindowManager {
     constructor(settingsManager, highlightManager) {
-        this._settingsManager = settingsManager; //
-        this._highlightManager = highlightManager; //
-        this._zoneDetector = new ZoneDetector(); //
-        this._signalConnections = []; //
+        this._settingsManager = settingsManager; 
+        this._highlightManager = highlightManager; 
+        this._zoneDetector = new ZoneDetector(); 
+        this._signalConnections = []; 
         this._windowTracker = Shell.WindowTracker.get_default(); // Added for app info
 
-        this._snappedWindows = {}; //
-        this._cycleIndexByZone = {}; //
-        this._tabBars = {}; //
+        this._snappedWindows = {}; 
+        this._cycleIndexByZone = {}; 
+        this._tabBars = {}; 
 
         this._splitStates = new Map(); // Tracks { originalHeight, childZoneId, isActive }
         this._activeDisplayZones = []; // Zones actually used for snapping/display
     }
 
     _getEvasionKeyMask() {
-        const keyName = this._settingsManager.getSnapEvasionKeyName(); //
-        switch (keyName?.toLowerCase()) { //
-            case 'control': //
-                return Clutter.ModifierType.CONTROL_MASK; //
-            case 'alt': //
-                return Clutter.ModifierType.MOD1_MASK; //
-            case 'shift': //
-                return Clutter.ModifierType.SHIFT_MASK; //
-            case 'super': //
-                return Clutter.ModifierType.MOD4_MASK; //
-            case 'disabled': //
-            default: //
-                return 0; //
+        const keyName = this._settingsManager.getSnapEvasionKeyName(); 
+        switch (keyName?.toLowerCase()) { 
+            case 'control': 
+                return Clutter.ModifierType.CONTROL_MASK; 
+            case 'alt': 
+                return Clutter.ModifierType.MOD1_MASK; 
+            case 'shift': 
+                return Clutter.ModifierType.SHIFT_MASK; 
+            case 'super': 
+                return Clutter.ModifierType.MOD4_MASK; 
+            case 'disabled': 
+            default: 
+                return 0; 
         }
     }
 
@@ -114,135 +114,138 @@ export class WindowManager {
     }
 
     connectSignals() {
-        this._disconnectSignals(); //
-        if (!this._settingsManager.isZoningEnabled()) { //
-            log('connectSignals', 'Zoning disabled.'); //
-            return; //
+        this._disconnectSignals(); 
+        if (!this._settingsManager.isZoningEnabled()) { 
+            log('connectSignals', 'Zoning disabled.'); 
+            return; 
         }
         this._rebuildActiveDisplayZones(); // Initial build of active zones
-        this._connect(global.display, 'grab-op-begin', (d, w, o) => this._onGrabOpBegin(d, w, o)); //
-        this._connect(global.display, 'grab-op-end', (d, w, o) => this._onGrabOpEnd(d, w, o)); //
-        this._connect(global.display, 'window-created', (d, w) => this._onWindowCreated(d, w)); //
-        log('connectSignals', 'Signals connected.'); //
+        this._connect(global.display, 'grab-op-begin', (d, w, o) => this._onGrabOpBegin(d, w, o)); 
+        this._connect(global.display, 'grab-op-end', (d, w, o) => this._onGrabOpEnd(d, w, o)); 
+        this._connect(global.display, 'window-created', (d, w) => this._onWindowCreated(d, w)); 
+        log('connectSignals', 'Signals connected.'); 
     }
 
     _connect(gobj, name, cb) {
-        const id = gobj.connect(name, cb); //
-        this._signalConnections.push({ gobj, id }); //
+        const id = gobj.connect(name, cb); 
+        this._signalConnections.push({ gobj, id }); 
     }
 
     _disconnectSignals() {
-        this._signalConnections.forEach(({ gobj, id }) => { //
-            try { gobj.disconnect(id); } catch { } //
+        this._signalConnections.forEach(({ gobj, id }) => { 
+            try { gobj.disconnect(id); } catch { } 
         });
-        this._signalConnections = []; //
+        this._signalConnections = []; 
     }
 
     _onWindowCreated(display, window) {
-        if (!this._settingsManager.isZoningEnabled() || //
-            !this._settingsManager.isTileNewWindowsEnabled()) //
-            return; //
-        if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) //
-            return; //
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { //
+        if (!this._settingsManager.isZoningEnabled() || 
+            !this._settingsManager.isTileNewWindowsEnabled()) 
+            return; 
+        if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) 
+            return; 
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { 
             if (!window || typeof window.get_frame_rect !== 'function' || !window.get_compositor_private()) return GLib.SOURCE_REMOVE; // Added get_compositor_private check
 
-            const rect = window.get_frame_rect(); //
-            const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; //
-            const mon = window.get_monitor(); //
+            const rect = window.get_frame_rect(); 
+            const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; 
+            const mon = window.get_monitor(); 
             // Use active display zones
-            const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon); //
-            if (zoneDef) { //
-                this._snapWindowToZone(window, zoneDef, false); //
-                log('_onWindowCreated', `Auto-snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`); //
+            const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon); 
+            if (zoneDef) { 
+                this._snapWindowToZone(window, zoneDef, false); 
+                log('_onWindowCreated', `Auto-snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`); 
             }
-            return GLib.SOURCE_REMOVE; //
+            return GLib.SOURCE_REMOVE; 
         });
     }
 
     _onGrabOpBegin(display, window, op) {
-        const isMouseMoving = (op & Meta.GrabOp.MOVING) !== 0; //
-        const isKeyboardMoving = (op & Meta.GrabOp.KEYBOARD_MOVING) !== 0; //
+        const isMouseMoving = (op & Meta.GrabOp.MOVING) !== 0; 
+        const isKeyboardMoving = (op & Meta.GrabOp.KEYBOARD_MOVING) !== 0; 
 
-        const evasionKeyMask = this._getEvasionKeyMask(); //
-        const [, , mods] = global.get_pointer(); //
-        const isEvasionKeyHeld = evasionKeyMask !== 0 && (mods & evasionKeyMask) !== 0; //
+        const evasionKeyMask = this._getEvasionKeyMask(); 
+        const [, , mods] = global.get_pointer(); 
+        const isEvasionKeyHeld = evasionKeyMask !== 0 && (mods & evasionKeyMask) !== 0; 
 
-        delete window._autoZonerEvasionBypass; //
-        if (isEvasionKeyHeld) { //
-            window._autoZonerEvasionBypass = true; //
-            const keyName = this._settingsManager.getSnapEvasionKeyName(); //
-            log('_onGrabOpBegin', `${keyName} key is held for "${window.get_title()}", bypassing highlights and original rect store.`); //
-            this._highlightManager?.stopUpdating(); //
-            return; //
+        delete window._autoZonerEvasionBypass; 
+        if (isEvasionKeyHeld) { 
+            window._autoZonerEvasionBypass = true; 
+            const keyName = this._settingsManager.getSnapEvasionKeyName(); 
+            log('_onGrabOpBegin', `${keyName} key is held for "${window.get_title()}", bypassing highlights and original rect store.`); 
+            this._highlightManager?.stopUpdating(); 
+            return; 
         }
 
-        if (!(isMouseMoving || isKeyboardMoving)) { //
-            log('_onGrabOpBegin', `Operation is not a move (op: ${op}), stopping highlights and skipping further setup.`); //
-            this._highlightManager?.stopUpdating(); //
-            return; //
+        if (!(isMouseMoving || isKeyboardMoving)) { 
+            log('_onGrabOpBegin', `Operation is not a move (op: ${op}), stopping highlights and skipping further setup.`); 
+            this._highlightManager?.stopUpdating(); 
+            return; 
         }
 
         if (!window || !window.get_compositor_private() || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
-            return; //
-        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) { //
-            window._autoZonerOriginalRect = window.get_frame_rect(); //
-            log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}" during normal move.`); //
+            return; 
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) { 
+            window._autoZonerOriginalRect = window.get_frame_rect(); 
+            log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}" during normal move.`); 
         }
-        this._highlightManager?.startUpdating(); //
+        this._highlightManager?.startUpdating(); 
     }
 
-    _onGrabOpEnd(display, window, op) {
-        this._highlightManager?.stopUpdating(); //
+    _onGrabOpEnd(display, window, op) { 
 
-        const wasEvasionBypassActiveAtStart = window._autoZonerEvasionBypass; //
-        delete window._autoZonerEvasionBypass; //
+        this._highlightManager?.stopUpdating(); 
 
-        const evasionKeyMask = this._getEvasionKeyMask(); //
-        const [, , modsAtEnd] = global.get_pointer(); //
-        const isEvasionKeyHeldAtEnd = evasionKeyMask !== 0 && (modsAtEnd & evasionKeyMask) !== 0; //
-        if (isEvasionKeyHeldAtEnd || wasEvasionBypassActiveAtStart) { //
-            const keyName = this._settingsManager.getSnapEvasionKeyName(); //
-            log('_onGrabOpEnd', `${keyName} key is (or was at start) held for "${window.get_title()}", bypassing snap logic. Window remains at current pos.`); //
-            if (window._autoZonerIsZoned) { //
-                this._unsnapWindow(window, /* keepCurrentPosition = */ true); //
-            } else { //
-                delete window._autoZonerOriginalRect; //
+        const wasEvasionBypassActiveAtStart = window._autoZonerEvasionBypass; 
+        delete window._autoZonerEvasionBypass; 
+
+        const evasionKeyMask = this._getEvasionKeyMask(); 
+        const [, , modsAtEnd] = global.get_pointer(); 
+        const isEvasionKeyHeldAtEnd = evasionKeyMask !== 0 && (modsAtEnd & evasionKeyMask) !== 0; 
+        if (isEvasionKeyHeldAtEnd || wasEvasionBypassActiveAtStart) { 
+            const keyName = this._settingsManager.getSnapEvasionKeyName(); 
+            log('_onGrabOpEnd', `${keyName} key is (or was at start) held for "${window.get_title()}", bypassing snap logic. Window remains at current pos.`); 
+            if (window._autoZonerIsZoned) { 
+                this._unsnapWindow(window, /* keepCurrentPosition = */ true); 
+            } else { 
+                delete window._autoZonerOriginalRect; 
             }
-            return; //
+            return; 
         }
 
-        if (op === Meta.GrabOp.MOVING || op === Meta.GrabOp.KEYBOARD_MOVING) { //
-            log('_onGrabOpEnd', `Operation is MOVING or KEYBOARD_MOVING (op: ${op}), proceeding to normal snap logic.`); //
-        } else if ((op & ALL_RESIZING_OPS) !== 0) { //
-            log('_onGrabOpEnd', `Operation is RESIZING (op: ${op}) and not a direct move type, skipping snap.`); //
-            return; //
-        } else { //
-            log('_onGrabOpEnd', `Operation is UNKNOWN or not a snappable type (op: ${op}), skipping snap.`); //
-            return; //
+        if (op === Meta.GrabOp.MOVING || op === Meta.GrabOp.KEYBOARD_MOVING) { 
+            log('_onGrabOpEnd', `Operation is MOVING or KEYBOARD_MOVING (op: ${op}), proceeding to normal snap logic.`); 
+        } else if ((op & ALL_RESIZING_OPS) !== 0) { 
+            log('_onGrabOpEnd', `Operation is RESIZING (op: ${op}) and not a direct move type, skipping snap.`); 
+            return; 
+        } else { 
+            log('_onGrabOpEnd', `Operation is UNKNOWN or not a snappable type (op: ${op}), skipping snap.`); 
+            return; 
         }
 
-        if (!this._settingsManager.isZoningEnabled()) return; //
+
+        if (!this._settingsManager.isZoningEnabled()) return; 
         if (!window || !window.get_compositor_private() || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) { // Added get_compositor_private check
-            this._unsnapWindow(window); //
-            return; //
+            this._unsnapWindow(window); 
+            return; 
         }
 
-        const [pointerX, pointerY] = global.get_pointer(); //
-        const hitRect = new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 }); //
-        let mon = global.display.get_monitor_index_for_rect(hitRect); //
-        if (mon < 0) //
-            mon = window.get_monitor(); //
-        if (mon < 0 || mon >= Main.layoutManager.monitors.length) { //
-            mon = Main.layoutManager.primaryIndex; //
+
+        const [pointerX, pointerY] = global.get_pointer(); 
+        const hitRect = new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 }); 
+        let mon = global.display.get_monitor_index_for_rect(hitRect); 
+        if (mon < 0) 
+            mon = window.get_monitor(); 
+        if (mon < 0 || mon >= Main.layoutManager.monitors.length) { 
+            mon = Main.layoutManager.primaryIndex; 
         }
 
-        const center = { x: pointerX, y: pointerY }; //
+
+        const center = { x: pointerX, y: pointerY }; 
         // Use active display zones
-        const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon); //
-        if (zoneDef) { //
-            this._snapWindowToZone(window, zoneDef, true); //
-            //log('_onGrabOpEnd', `Snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`); //
+        const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon); 
+        if (zoneDef) { 
+			this._snapWindowToZone(window, zoneDef, true); 
             
             // MODIFIED LOG LINE STARTS HERE
             const app = this._windowTracker.get_window_app(window);
@@ -250,39 +253,34 @@ export class WindowManager {
             const appId = app ? app.get_id() : 'N/A';
             const wmClass = window.get_wm_class() || 'N/A';
             const wmClassInstance = window.get_wm_class_instance() || 'N/A';
-                        
-            /*log('_onGrabOpEnd',
-                `\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nSnapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}". ` +
-                `App Info: 1. Name: "${appName}", 2. App ID: "${appId}" , ` +
-                `3. WM_CLASS: "${wmClass}", 4. WM_CLASS_INSTANCE: "${wmClassInstance}"`
-            );*/
-            // MODIFIED LOG LINE ENDS HERE
             
-            
-        } else { //
-            this._unsnapWindow(window); //
+        } else { 
+            this._unsnapWindow(window); 
         }
     }
     
     _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
-        let bar = this._tabBars[zoneId]; //
-        if (!bar) { //
-            bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this); // Pass zoneDef and this (WindowManager) //
-            this._tabBars[zoneId] = bar; //
-            Main.uiGroup.add_child(bar); //
+        let bar = this._tabBars[zoneId]; 
+        if (!bar) { 
+            bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this); // Pass zoneDef and this (WindowManager) 
+            this._tabBars[zoneId] = bar; 
+            Main.uiGroup.add_child(bar); 
         }
-        const wa = Main.layoutManager.getWorkAreaForMonitor(monitorIndex); //
-        const x = wa.x + zoneDef.x; //
-        const y = wa.y + Math.max(0, zoneDef.y); //
-        const height = this._settingsManager.getTabBarHeight(); //
-        bar.set_position(x, y); //
-        bar.set_size(zoneDef.width, height); //
-        bar.set_style(`height: ${height}px;`); //
-        return bar; //
+
+        const monitor = Main.layoutManager.monitors[monitorIndex];
+        // Use monitor.x and monitor.y as the base, not wa.x and wa.y
+        const x = monitor.x + zoneDef.x; // 
+        const y = monitor.y + Math.max(0, zoneDef.y); // 
+        
+        const height = this._settingsManager.getTabBarHeight(); // 
+        bar.set_position(x, y); // 
+        bar.set_size(zoneDef.width, height); // 
+        bar.set_style(`height: ${height}px;`); // 
+        return bar; // 
     }
 
-    snapAllWindowsToZones(previouslySnappedWindowsByZone = null) {
-        if (!this._settingsManager.isZoningEnabled()) return; //
+    snapAllWindowsToZones(previouslySnappedWindowsByZone = null) { 
+        if (!this._settingsManager.isZoningEnabled()) return; 
         log('snapAllWindowsToZones', `Snapping all windows. Previously snapped: ${previouslySnappedWindowsByZone ? Object.keys(previouslySnappedWindowsByZone).length : 0} zones.`);
 
         // Ensure active zones are current
@@ -322,200 +320,211 @@ export class WindowManager {
         }
 
         // Snap any remaining/newly created windows not handled by the above
-        global.get_window_actors().forEach(actor => { //
-            const win = actor.get_meta_window(); //
+        global.get_window_actors().forEach(actor => { 
+            const win = actor.get_meta_window(); 
             // Only process if not already snapped by the logic above
             if (!win || !win.get_compositor_private() || win._autoZonerIsZoned || win.is_fullscreen() || win.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
-                return; //
+                return; 
             this._snapWindowByCurrentPosition(win, currentActiveZones);
         });
         log('snapAllWindowsToZones', 'Finished snapping all windows.');
     }
 
-    _snapWindowByCurrentPosition(win, zonesToSearch) {
-        const rect = win.get_frame_rect(); //
-        const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; //
-        let mon = win.get_monitor(); //
-        if (mon < 0 || mon >= Main.layoutManager.monitors.length) { //
-            mon = Main.layoutManager.primaryIndex; //
-        }
+    _snapWindowByCurrentPosition(win, zonesToSearch) { // xxx
+		const rect = win.get_frame_rect();
+		const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+		let mon = win.get_monitor();
+		if (mon < 0 || mon >= Main.layoutManager.monitors.length) {
+		    mon = Main.layoutManager.primaryIndex;
+		}
 
-        let zoneDef = this._zoneDetector.findTargetZone(zonesToSearch, center, mon); //
-        if (!zoneDef) { // Fallback to closest zone on the same monitor //
-            const wa = Main.layoutManager.getWorkAreaForMonitor(mon); //
-            let bestDistanceSq = Infinity;
-            let closestZone = null;
-            zonesToSearch.filter(z => z.monitorIndex === mon).forEach(zDef => { //
-                const zoneCenterX = wa.x + zDef.x + zDef.width / 2; //
-                const zoneCenterY = wa.y + zDef.y + zDef.height / 2; //
-                const dx = zoneCenterX - center.x; //
-                const dy = zoneCenterY - center.y; //
-                const distSq = dx * dx + dy * dy; //
-                if (distSq < bestDistanceSq) { //
-                    bestDistanceSq = distSq; //
-                    closestZone = zDef; //
-                }
-            });
-            zoneDef = closestZone; //
-        }
-        if (zoneDef) this._snapWindowToZone(win, zoneDef, false); //
-    }
+		let zoneDef = this._zoneDetector.findTargetZone(zonesToSearch, center, mon);
+		if (!zoneDef) { // Fallback to closest zone on the same monitor
+		    // Change from workArea to full monitor geometry
+		    const monitor = Main.layoutManager.monitors[mon]; // Changed from wa
+		    let bestDistanceSq = Infinity;
+		    let closestZone = null;
+		    zonesToSearch.filter(z => z.monitorIndex === mon).forEach(zDef => {
+		        const zoneCenterX = monitor.x + zDef.x + zDef.width / 2; // Use monitor.x
+		        const zoneCenterY = monitor.y + zDef.y + zDef.height / 2; // Use monitor.y
+		        const dx = zoneCenterX - center.x;
+		        const dy = zoneCenterY - center.y;
+		        const distSq = dx * dx + dy * dy;
+		        if (distSq < bestDistanceSq) {
+		            bestDistanceSq = distSq;
+		            closestZone = zDef;
+		        }
+		    });
+		    zoneDef = closestZone;
+		}
+		if (zoneDef) this._snapWindowToZone(win, zoneDef, false);
+	}
 
-    _snapWindowToZone(window, zoneDef, isGrabOpContext = false) {
-        const zoneId = zoneDef.id || zoneDef.name || JSON.stringify(zoneDef); //
-        const oldZoneId = window._autoZonerZoneId; //
+	_snapWindowToZone(window, zoneDef, isGrabOpContext = false) { // xxx
+        const zoneId = zoneDef.id || zoneDef.name || JSON.stringify(zoneDef);
+        const oldZoneId = window._autoZonerZoneId;
 
-        if (oldZoneId && oldZoneId !== zoneId) { //
-            // Find from active zones, as oldZoneId might be a dynamic child ID
-            const oldZoneDef = this._activeDisplayZones.find(z => z.id === oldZoneId); //
-            if (oldZoneDef) { //
-                this._getZoneTabBar(oldZoneId, oldZoneDef.monitorIndex, oldZoneDef).removeWindow(window); //
-                this._snappedWindows[oldZoneId] = (this._snappedWindows[oldZoneId] || []).filter(w => w !== window); //
+        if (oldZoneId && oldZoneId !== zoneId) {
+            const oldZoneDef = this._activeDisplayZones.find(z => z.id === oldZoneId);
+            if (oldZoneDef) {
+                this._getZoneTabBar(oldZoneId, oldZoneDef.monitorIndex, oldZoneDef).removeWindow(window);
+                this._snappedWindows[oldZoneId] = (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
             }
         }
 
-        if (window.get_maximized && window.get_maximized()) //
-            window.unmaximize(Meta.MaximizeFlags.BOTH); //
-        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) { //
-            // This check assumes _onGrabOpBegin correctly decided not to store if evasion was active.
-            // If we reach here, it's a normal snap or a snap initiated not from a grab op where evasion matters. //
-            window._autoZonerOriginalRect = window.get_frame_rect(); //
-            log('_snapWindowToZone', `Stored original rect for "${window.get_title()}"`); //
+        if (window.get_maximized && window.get_maximized())
+            window.unmaximize(Meta.MaximizeFlags.BOTH);
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
+            window._autoZonerOriginalRect = window.get_frame_rect();
+            log('_snapWindowToZone', `Stored original rect for "${window.get_title()}"`);
         }
 
-        this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || []; //
-        if (!this._snappedWindows[zoneId].includes(window)) //
-            this._snappedWindows[zoneId].push(window); //
-        this._cycleIndexByZone[zoneId] = (this._snappedWindows[zoneId].length - 1); //
-        window._autoZonerIsZoned = true; //
-        window._autoZonerZoneId = zoneId; // zoneId here is zoneDef.id //
+        this._snappedWindows[zoneId] = this._snappedWindows[zoneId] || [];
+        if (!this._snappedWindows[zoneId].includes(window))
+            this._snappedWindows[zoneId].push(window);
+        this._cycleIndexByZone[zoneId] = (this._snappedWindows[zoneId].length - 1);
+        window._autoZonerIsZoned = true;
+        window._autoZonerZoneId = zoneId; // zoneId here is zoneDef.id
 
-        const wa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex); //
-        const barHeight = this._settingsManager.getTabBarHeight(); //
-        const minWindowDim = 50; //
-        const zoneGap = this._settingsManager.getZoneGapSize(); //
-        let gapPosOffset = 0; let gapSizeReduction = 0; //
-        if (zoneGap > 0) { gapPosOffset = Math.floor(zoneGap / 2); gapSizeReduction = zoneGap; //
+        const monitor = Main.layoutManager.monitors[zoneDef.monitorIndex];
+        const barHeight = this._settingsManager.getTabBarHeight(); 
+        const minWindowDim = 50;
+        const zoneGap = this._settingsManager.getZoneGapSize(); 
+        let gapPosOffset = 0; let gapSizeReduction = 0;
+        if (zoneGap > 0) {
+            gapPosOffset = Math.floor(zoneGap / 2);
+            gapSizeReduction = zoneGap;
         }
 
-        const slotX = wa.x + zoneDef.x; //
-        let slotW = Math.min(zoneDef.width, (wa.x + wa.width) - slotX); //
-        slotW = Math.max(slotW, minWindowDim); //
-        const actualZoneYInWorkArea = zoneDef.y; //
-        const clippedZoneYInWorkArea = Math.max(0, actualZoneYInWorkArea); //
-        const yClippage = clippedZoneYInWorkArea - actualZoneYInWorkArea; //
-        const slotContentY = wa.y + clippedZoneYInWorkArea + barHeight; //
-        let slotH = Math.min(zoneDef.height - yClippage - barHeight, (wa.y + wa.height) - slotContentY); //
-        slotH = Math.max(slotH, minWindowDim); //
-        const gappedWindowX = slotX + gapPosOffset; //
-        let gappedWindowW = Math.max(slotW - gapSizeReduction, minWindowDim); //
-        const gappedWindowY = slotContentY + gapPosOffset; //
-        let gappedWindowH = Math.max(slotH - gapSizeReduction, minWindowDim); //
-        const tabBarX = wa.x + zoneDef.x + (zoneGap > 0 ? gapPosOffset : 0); //
-        const tabBarY = wa.y + clippedZoneYInWorkArea + (zoneGap > 0 ? gapPosOffset : 0); //
-        const tabBarW = gappedWindowW; //
-        window.move_resize_frame(false, gappedWindowX, gappedWindowY, gappedWindowW, gappedWindowH); //
-        const tabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef); //
-        tabBar.set_position(tabBarX, tabBarY); //
-        tabBar.set_size(tabBarW, barHeight); //
-        if (!isGrabOpContext) {  //
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { //
-                if (window && window.get_compositor_private() && typeof window.get_frame_rect === 'function' && // Added get_compositor_private check
-                    window._autoZonerZoneId === zoneId && !window.is_fullscreen() && //
-                    window.get_maximized() === Meta.MaximizeFlags.NONE) { //
-                    const currentRect = window.get_frame_rect(); //
-                    if (currentRect.x !== gappedWindowX || currentRect.y !== gappedWindowY || //
-                        currentRect.width !== gappedWindowW || currentRect.height !== gappedWindowH) { //
-                        log('_snapWindowToZone[DelayedCheck]', `Window "${window.get_title()}" mismatch. 
-Re-applying.`); //
-                        window.move_resize_frame(false, gappedWindowX, gappedWindowY, gappedWindowW, gappedWindowH); //
-                        const delayedTabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef); //
-                        delayedTabBar.set_position(tabBarX, tabBarY); //
-                        delayedTabBar.set_size(tabBarW, barHeight); //
+        const slotX = monitor.x + zoneDef.x;
+        let slotW = Math.min(zoneDef.width, (monitor.x + monitor.width) - slotX);
+        slotW = Math.max(slotW, minWindowDim);
+
+        // Calculate the Y position for the content area (below the tab bar, accounting for gap)
+        // The tab bar is placed at the top of the zone definition, relative to monitor.y
+        // We need to ensure the tab bar itself also respects the top gap.
+		const tabBarY = monitor.y + zoneDef.y + zoneGap;
+        const slotContentY = tabBarY + barHeight; // Base content Y from the adjusted tab bar Y (space between the tab and the window ####) 
+
+
+        let slotH = Math.min(zoneDef.height - barHeight - (zoneGap > 0 ? zoneGap : 0) , (monitor.y + monitor.height) - slotContentY);
+        slotH = Math.max(slotH, minWindowDim);
+
+        const gappedWindowX = slotX + gapPosOffset;
+        let gappedWindowW = Math.max(slotW - gapSizeReduction, minWindowDim);
+        const gappedWindowY = slotContentY + gapPosOffset;
+        let gappedWindowH = Math.max(slotH - gapSizeReduction, minWindowDim);
+
+        // The tabBarX is already adjusted by gapPosOffset from earlier.
+        const tabBarX = monitor.x + zoneDef.x + gapPosOffset; // This line was already okay.
+
+
+        const tabBarW = gappedWindowW; // Tab bar width should align with gapped window width
+        window.move_resize_frame(false, gappedWindowX, gappedWindowY, gappedWindowW, gappedWindowH);
+        const tabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
+        tabBar.set_position(tabBarX, tabBarY);
+        tabBar.set_size(tabBarW, barHeight);
+        tabBar.set_style(`height: ${barHeight}px;`);
+
+        if (!isGrabOpContext) {
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
+                if (window && window.get_compositor_private() && typeof window.get_frame_rect === 'function' &&
+                    window._autoZonerZoneId === zoneId && !window.is_fullscreen() &&
+                    window.get_maximized() === Meta.MaximizeFlags.NONE) {
+                    const currentRect = window.get_frame_rect();
+                    if (currentRect.x !== gappedWindowX || currentRect.y !== gappedWindowY ||
+                        currentRect.width !== gappedWindowW || currentRect.height !== gappedWindowH) {
+                        log('_snapWindowToZone[DelayedCheck]', `Window "${window.get_title()}" mismatch. Re-applying.`);
+                        window.move_resize_frame(false, gappedWindowX, gappedWindowY, gappedWindowW, gappedWindowH);
+                        const delayedTabBar = this._getZoneTabBar(zoneId, zoneDef.monitorIndex, zoneDef);
+                        delayedTabBar.set_position(tabBarX, tabBarY);
+                        delayedTabBar.set_size(tabBarW, barHeight);
                     }
                 }
-                return GLib.SOURCE_REMOVE; //
+                return GLib.SOURCE_REMOVE;
             });
         }
-        tabBar.addWindow(window); //
-        this._activateWindow(zoneId, window); //
+
+        tabBar.addWindow(window); 
+        this._activateWindow(zoneId, window);
+
     }
 
-    _unsnapWindow(window, keepCurrentPosition = false) {
-        const oldZoneId = window._autoZonerZoneId; //
+    _unsnapWindow(window, keepCurrentPosition = false) { 
+        const oldZoneId = window._autoZonerZoneId; 
         // Only proceed if it was actually zoned OR if we're explicitly keeping position (e.g. Ctrl-drag of a non-zoned window needs its OriginalRect cleared)
-        if (!oldZoneId && !keepCurrentPosition) { //
-            return; //
+        if (!oldZoneId && !keepCurrentPosition) { 
+            return; 
         }
-        log('_unsnapWindow', `Unsnapping "${window.get_title()}" from zone "${oldZoneId || 'N/A'}". keepCurrentPosition=${keepCurrentPosition}`); //
-        if (!keepCurrentPosition && this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) { //
-            const o = window._autoZonerOriginalRect; //
-            window.move_resize_frame(false, o.x, o.y, o.width, o.height); //
-            delete window._autoZonerOriginalRect;  //
-        } else if (keepCurrentPosition) { //
-            delete window._autoZonerOriginalRect; //
+        log('_unsnapWindow', `Unsnapping "${window.get_title()}" from zone "${oldZoneId || 'N/A'}". keepCurrentPosition=${keepCurrentPosition}`); 
+        if (!keepCurrentPosition && this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) { 
+            const o = window._autoZonerOriginalRect; 
+            window.move_resize_frame(false, o.x, o.y, o.width, o.height); 
+            delete window._autoZonerOriginalRect;  
+        } else if (keepCurrentPosition) { 
+            delete window._autoZonerOriginalRect; 
         }
 
-        if (oldZoneId) {  //
-            delete window._autoZonerIsZoned; //
-            delete window._autoZonerZoneId; //
+        if (oldZoneId) {  
+            delete window._autoZonerIsZoned; 
+            delete window._autoZonerZoneId; 
 
-            const oldZoneDef = this._activeDisplayZones.find(z => z.id === oldZoneId); // Find from active zones //
-            if (oldZoneDef) { //
-                const tabBar = this._tabBars[oldZoneId]; //
-                if (tabBar) { //
-                    tabBar.removeWindow(window); //
+            const oldZoneDef = this._activeDisplayZones.find(z => z.id === oldZoneId); // Find from active zones 
+            if (oldZoneDef) { 
+                const tabBar = this._tabBars[oldZoneId]; 
+                if (tabBar) { 
+                    tabBar.removeWindow(window); 
                 }
             }
-            this._snappedWindows[oldZoneId] = (this._snappedWindows[oldZoneId] || []).filter(w => w !== window); //
-            if (this._snappedWindows[oldZoneId] && this._snappedWindows[oldZoneId].length === 0) { //
-                if (this._tabBars[oldZoneId]) { //
-                    this._tabBars[oldZoneId].destroy(); //
-                    delete this._tabBars[oldZoneId]; //
+            this._snappedWindows[oldZoneId] = (this._snappedWindows[oldZoneId] || []).filter(w => w !== window); 
+            if (this._snappedWindows[oldZoneId] && this._snappedWindows[oldZoneId].length === 0) { 
+                if (this._tabBars[oldZoneId]) { 
+                    this._tabBars[oldZoneId].destroy(); 
+                    delete this._tabBars[oldZoneId]; 
                 }
-                delete this._cycleIndexByZone[oldZoneId]; //
+                delete this._cycleIndexByZone[oldZoneId]; 
             }
         }
     }
 
     cycleWindowsInCurrentZone() {
-        const focus = global.display.focus_window; //
+        const focus = global.display.focus_window; 
         if (!focus || !focus._autoZonerZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
-            log('cycle', 'No valid zoned window focused; aborting.'); //
-            return; //
+            log('cycle', 'No valid zoned window focused; aborting.'); 
+            return; 
         }
-        const zoneId = focus._autoZonerZoneId; //
-        const list = this._snappedWindows[zoneId] || []; //
-        if (list.length < 2) { //
-            log('cycle', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`); //
-            return; //
+        const zoneId = focus._autoZonerZoneId; 
+        const list = this._snappedWindows[zoneId] || []; 
+        if (list.length < 2) { 
+            log('cycle', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`); 
+            return; 
         }
-        let idx = (this._cycleIndexByZone[zoneId] + 1) % list.length; //
-        this._cycleIndexByZone[zoneId] = idx; //
-        const nextWin = list[idx]; //
+        let idx = (this._cycleIndexByZone[zoneId] + 1) % list.length; 
+        this._cycleIndexByZone[zoneId] = idx; 
+        const nextWin = list[idx]; 
         if (!nextWin || !nextWin.get_compositor_private()) { log('cycle', 'Next window in cycle is invalid.'); return; } // Added check
-        log('cycle', `Cycling to [${idx}] "${nextWin.get_title()}" in zone "${zoneId}".`); //
-        this._activateWindow(zoneId, nextWin); //
+        log('cycle', `Cycling to [${idx}] "${nextWin.get_title()}" in zone "${zoneId}".`); 
+        this._activateWindow(zoneId, nextWin); 
     }
 
     cycleWindowsInCurrentZoneBackward() {
-        const focus = global.display.focus_window; //
+        const focus = global.display.focus_window; 
         if (!focus || !focus._autoZonerZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
-            log('cycle-backward', 'No valid zoned window focused; aborting.'); //
-            return; //
+            log('cycle-backward', 'No valid zoned window focused; aborting.'); 
+            return; 
         }
-        const zoneId = focus._autoZonerZoneId; //
-        const list = this._snappedWindows[zoneId] || []; //
-        if (list.length < 2) { //
-            log('cycle-backward', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`); //
-            return; //
+        const zoneId = focus._autoZonerZoneId; 
+        const list = this._snappedWindows[zoneId] || []; 
+        if (list.length < 2) { 
+            log('cycle-backward', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`); 
+            return; 
         }
-        let idx = (this._cycleIndexByZone[zoneId] - 1 + list.length) % list.length; //
-        this._cycleIndexByZone[zoneId] = idx; //
-        const prevWin = list[idx]; //
+        let idx = (this._cycleIndexByZone[zoneId] - 1 + list.length) % list.length; 
+        this._cycleIndexByZone[zoneId] = idx; 
+        const prevWin = list[idx]; 
         if (!prevWin || !prevWin.get_compositor_private()) { log('cycle-backward', 'Previous window in cycle is invalid.'); return; } // Added check
-        log('cycle-backward', `Cycling backward to [${idx}] "${prevWin.get_title()}" in zone "${zoneId}".`); //
-        this._activateWindow(zoneId, prevWin); //
+        log('cycle-backward', `Cycling backward to [${idx}] "${prevWin.get_title()}" in zone "${zoneId}".`); 
+        this._activateWindow(zoneId, prevWin); 
     }
 
     _activateWindow(zoneId, window) {
@@ -523,56 +532,57 @@ Re-applying.`); //
             log('_activateWindow', 'Attempted to activate an invalid window.');
             return;
         }
-        const list = this._snappedWindows[zoneId] || []; //
-        const currentWindowIndex = list.indexOf(window); //
-        if (currentWindowIndex !== -1) { //
-            this._cycleIndexByZone[zoneId] = currentWindowIndex; //
+        const list = this._snappedWindows[zoneId] || []; 
+        const currentWindowIndex = list.indexOf(window); 
+        if (currentWindowIndex !== -1) { 
+            this._cycleIndexByZone[zoneId] = currentWindowIndex; 
         }
-        const now = global.get_current_time(); //
-        window.activate(now); //
-        this._tabBars[zoneId]?.highlightWindow(window); //
+        const now = global.get_current_time(); 
+        window.activate(now); 
+        this._tabBars[zoneId]?.highlightWindow(window); 
     }
 
     cleanupWindowProperties() {
-        global.get_window_actors().forEach(actor => { //
-            const w = actor.get_meta_window(); //
-            if (w) { //
-                delete w._autoZonerIsZoned; //
-                delete w._autoZonerOriginalRect; //
-                delete w._autoZonerZoneId; //
-                delete w._autoZonerEvasionBypass;  //
+        global.get_window_actors().forEach(actor => { 
+            const w = actor.get_meta_window(); 
+            if (w) { 
+                delete w._autoZonerIsZoned; 
+                delete w._autoZonerOriginalRect; 
+                delete w._autoZonerZoneId; 
+                delete w._autoZonerEvasionBypass;  
             }
         });
     }
 
-    updateAllTabAppearances() {
-        log('updateAllTabAppearances', 'Requesting update for appearance of all tab bars.'); //
-        for (const zoneId in this._tabBars) { //
-            const tabBar = this._tabBars[zoneId]; //
-            if (tabBar && typeof tabBar.refreshTabVisuals === 'function') { //
-                const zoneDef = this._activeDisplayZones.find(z => z.id === zoneId); // Use active zones //
-                log('updateAllTabAppearances', `Refreshing visuals for tab bar: ${zoneId}, zoneDef found: ${!!zoneDef}`); //
-                if (zoneDef) { //
-                    const wa = Main.layoutManager.getWorkAreaForMonitor(zoneDef.monitorIndex); //
-                    const barHeight = this._settingsManager.getTabBarHeight(); //
-                    const zoneGap = this._settingsManager.getZoneGapSize(); //
-                    const gapPosOffset = zoneGap > 0 ? Math.floor(zoneGap / 2) : 0; //
-                    const clippedZoneYInWorkArea = Math.max(0, zoneDef.y); //
-                    const tabBarX = wa.x + zoneDef.x + gapPosOffset; //
-                    const tabBarY = wa.y + clippedZoneYInWorkArea + gapPosOffset; //
-                    const minWindowDim = 50; //
-                    let slotW = Math.min(zoneDef.width, (wa.x + wa.width) - (wa.x + zoneDef.x)); //
-                    slotW = Math.max(slotW, minWindowDim); //
-                    let gappedWindowW = slotW - (zoneGap > 0 ? zoneGap : 0); //
-                    gappedWindowW = Math.max(gappedWindowW, minWindowDim); //
-                    const tabBarW = gappedWindowW; //
+    updateAllTabAppearances() { // xxx
+        log('updateAllTabAppearances', 'Requesting update for appearance of all tab bars.');
+        for (const zoneId in this._tabBars) {
+            const tabBar = this._tabBars[zoneId];
+            if (tabBar && typeof tabBar.refreshTabVisuals === 'function') {
+                const zoneDef = this._activeDisplayZones.find(z => z.id === zoneId);
+                log('updateAllTabAppearances', `Refreshing visuals for tab bar: ${zoneId}, zoneDef found: ${!!zoneDef}`);
+                if (zoneDef) {
+                    const monitor = Main.layoutManager.monitors[zoneDef.monitorIndex];
+                    const barHeight = this._settingsManager.getTabBarHeight(); 
+                    const zoneGap = this._settingsManager.getZoneGapSize(); 
+                    const gapPosOffset = zoneGap > 0 ? Math.floor(zoneGap / 2) : 0;
 
-                    // Update TabBar's internal zoneDef if it has changed (e.g. split state)
+                    // MODIFIED LINE BELOW: Ensure tabBarY also includes gapPosOffset
+                    const tabBarX = monitor.x + zoneDef.x + gapPosOffset;
+                    const tabBarY = monitor.y + zoneDef.y + zoneGap;
+
+                    const minWindowDim = 50;
+                    let slotW = Math.min(zoneDef.width, (monitor.x + monitor.width) - (monitor.x + zoneDef.x));
+                    slotW = Math.max(slotW, minWindowDim);
+                    let gappedWindowW = slotW - (zoneGap > 0 ? zoneGap : 0);
+                    gappedWindowW = Math.max(gappedWindowW, minWindowDim);
+                    const tabBarW = gappedWindowW;
+
                     tabBar._zoneDef = zoneDef;
-                    tabBar.set_position(tabBarX, tabBarY); //
-                    tabBar.set_size(tabBarW, barHeight); //
-                    tabBar.set_style(`height: ${barHeight}px;`); //
-                    tabBar.refreshTabVisuals(); // Call refreshTabVisuals after properties are set
+                    tabBar.set_position(tabBarX, tabBarY);
+                    tabBar.set_size(tabBarW, barHeight);
+                    tabBar.set_style(`height: ${barHeight}px;`);
+                    tabBar.refreshTabVisuals();
                 }
             }
         }
@@ -610,17 +620,17 @@ Re-applying.`); //
     }
 
     destroy() {
-        this._disconnectSignals(); //
-        Object.values(this._tabBars).forEach(bar => bar.destroy()); //
-        this._tabBars = {}; //
+        this._disconnectSignals(); 
+        Object.values(this._tabBars).forEach(bar => bar.destroy()); 
+        this._tabBars = {}; 
         this._splitStates.clear();
         this._activeDisplayZones = [];
-        this.cleanupWindowProperties(); //
-        log('destroy', 'Destroyed.'); //
+        this.cleanupWindowProperties(); 
+        log('destroy', 'Destroyed.'); 
     }
 
     // Called from extension.js enable/disable or when settings change fundamentally
-    refreshZonesAndLayout() {
+    refreshZonesAndLayout() { 
         this._splitStates.clear(); // Clear any previous dynamic splits
         this._rebuildAndResnapAll();
     }
