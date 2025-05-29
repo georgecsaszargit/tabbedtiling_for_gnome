@@ -3,6 +3,7 @@ import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk'; 
 import Gio from 'gi://Gio'; 
 import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; 
+import { AppExceptionsEditor } from './AppExceptionsEditor.js';
 
 const TAB_BAR_HEIGHT_KEY                    = 'tab-bar-height'; 
 const TAB_FONT_SIZE_KEY                     = 'tab-font-size'; 
@@ -13,8 +14,17 @@ const TAB_SPACING_KEY                       = 'tab-spacing';
 const TAB_MIN_WIDTH_KEY                     = 'tab-min-width'; 
 const TAB_MAX_WIDTH_KEY                     = 'tab-max-width'; 
 
-export function createTabBarSettingsGroup(settings) {
-    const group = new Adw.PreferencesGroup({ title: _('Tab Bar Adjustments') }); 
+export function createTabBarSettingsGroup(settings, window) {
+    const page = new Adw.PreferencesPage({
+        title: _('Tab Bar Settings'),
+        icon_name: 'tab-new-symbolic'
+    });
+
+    // Tab Bar Appearance Group
+    const appearanceGroup = new Adw.PreferencesGroup({ 
+        title: _('Tab Bar Appearance'),
+        description: _('Customize the visual appearance of tab bars')
+    }); 
 
     // Tab Bar Height
     const heightSpin = Gtk.SpinButton.new_with_range(16, 200, 1); 
@@ -25,7 +35,7 @@ export function createTabBarSettingsGroup(settings) {
         activatable_widget: heightSpin 
     });
     heightRow.add_suffix(heightSpin); 
-    group.add(heightRow); 
+    appearanceGroup.add(heightRow); 
 
     // Tab Font Size
     const fontSpin = Gtk.SpinButton.new_with_range(6, 72, 1); 
@@ -36,7 +46,7 @@ export function createTabBarSettingsGroup(settings) {
         activatable_widget: fontSpin 
     });
     fontRow.add_suffix(fontSpin); 
-    group.add(fontRow); 
+    appearanceGroup.add(fontRow); 
 
     // Tab Icon Size
     const tabIconSizeSpin = Gtk.SpinButton.new_with_range(8, 64, 1); 
@@ -47,7 +57,7 @@ export function createTabBarSettingsGroup(settings) {
         activatable_widget: tabIconSizeSpin 
     });
     tabIconSizeRow.add_suffix(tabIconSizeSpin); 
-    group.add(tabIconSizeRow); 
+    appearanceGroup.add(tabIconSizeRow); 
 
     // Tab Corner Radius
     const tabCornerRadiusSpin = Gtk.SpinButton.new_with_range(0, 20, 1); 
@@ -58,7 +68,7 @@ export function createTabBarSettingsGroup(settings) {
         activatable_widget: tabCornerRadiusSpin 
     });
     tabCornerRadiusRow.add_suffix(tabCornerRadiusSpin); 
-    group.add(tabCornerRadiusRow); 
+    appearanceGroup.add(tabCornerRadiusRow); 
 
     // Tab Close Button Icon Size
     const tabCloseButtonIconSizeSpin = Gtk.SpinButton.new_with_range(8, 32, 1); 
@@ -69,7 +79,13 @@ export function createTabBarSettingsGroup(settings) {
         activatable_widget: tabCloseButtonIconSizeSpin 
     });
     tabCloseButtonIconSizeRow.add_suffix(tabCloseButtonIconSizeSpin); 
-    group.add(tabCloseButtonIconSizeRow); 
+    appearanceGroup.add(tabCloseButtonIconSizeRow); 
+
+    // Tab Layout Group
+    const layoutGroup = new Adw.PreferencesGroup({ 
+        title: _('Tab Layout'),
+        description: _('Control tab spacing and sizing behavior')
+    }); 
 
     // Tab Spacing
     const tabSpacingSpin = Gtk.SpinButton.new_with_range(0, 50, 1); 
@@ -80,7 +96,7 @@ export function createTabBarSettingsGroup(settings) {
         activatable_widget: tabSpacingSpin 
     });
     tabSpacingRow.add_suffix(tabSpacingSpin); 
-    group.add(tabSpacingRow); 
+    layoutGroup.add(tabSpacingRow); 
 
     // Tab Min Width
     const tabMinWidthSpin = Gtk.SpinButton.new_with_range(30, 300, 5); 
@@ -91,7 +107,7 @@ export function createTabBarSettingsGroup(settings) {
         activatable_widget: tabMinWidthSpin 
     });
     tabMinWidthRow.add_suffix(tabMinWidthSpin); 
-    group.add(tabMinWidthRow); 
+    layoutGroup.add(tabMinWidthRow); 
 
     // Tab Max Width
     const tabMaxWidthSpin = Gtk.SpinButton.new_with_range(50, 500, 5); 
@@ -102,7 +118,15 @@ export function createTabBarSettingsGroup(settings) {
         activatable_widget: tabMaxWidthSpin 
     });
     tabMaxWidthRow.add_suffix(tabMaxWidthSpin); 
-    group.add(tabMaxWidthRow); 
+    layoutGroup.add(tabMaxWidthRow); 
 
-    return group;
+    // Add groups to page
+    page.add(appearanceGroup);
+    page.add(layoutGroup);
+
+    // App Name Exceptions Group
+    const appExceptionsEditor = new AppExceptionsEditor(settings, window);
+    page.add(appExceptionsEditor.getWidget());
+
+    return page;
 }

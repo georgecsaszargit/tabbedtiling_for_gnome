@@ -97,6 +97,12 @@
       <description>Maximum width in pixels for an individual tab.</description>
     </key>
 
+    <key name="app-name-exceptions" type="s">
+      <default>'[]'</default>
+      <summary>App Name Exceptions</summary>
+      <description>A JSON string representing an array of app exceptions with word counts for tab labels.</description>
+    </key>
+
     <key name="snap-evasion-key" type="s">
       <default>'control'</default>
       <summary>Snap Evasion Key</summary>

@@ -19,8 +19,9 @@ const TAB_SPACING_KEY                       = 'tab-spacing';
 const TAB_MIN_WIDTH_KEY                     = 'tab-min-width';
 const TAB_MAX_WIDTH_KEY                     = 'tab-max-width';
 const SNAP_EVASION_KEY                      = 'snap-evasion-key';
+const APP_NAME_EXCEPTIONS_KEY               = 'app-name-exceptions';
 const DEFAULT_ZONES_FILENAME                = 'default_zones.json';
-const APP_NAME_EXCEPTIONS_FILENAME          = 'app_name_exceptions.json'; // New constant
+const APP_NAME_EXCEPTIONS_FILENAME          = 'app_name_exceptions.json'; // Keep for potential migration
 const log = (msg) => console.log(`[AutoZoner.SettingsManager] ${msg}`); 
 
 export class SettingsManager {
@@ -28,12 +29,14 @@ export class SettingsManager {
         this._gsettings       = gsettings;
         this._extensionPath   = extensionPath;
         this._zones           = [];
-        this._appNameExceptions = []; // New property
+        this._appNameExceptions = []; // Now stores {appId: string, wordCount: number}
         this._signalHandlers  = new Map();
         this._loadDefaultZonesFromFileIfNeeded(); 
         this._loadZonesFromGSettings();
-        this._loadAppNameExceptions(); // New method call
+        this._migrateAppNameExceptionsFromFile(); // One-time migration from old JSON file
+        this._loadAppNameExceptionsFromGSettings();
         this._connectSettingChange(ZONE_SETTINGS_KEY, () => this._loadZonesFromGSettings());
+        this._connectSettingChange(APP_NAME_EXCEPTIONS_KEY, () => this._loadAppNameExceptionsFromGSettings());
         this._connectSettingChange(ENABLE_ZONING_KEY, () => log('Enable auto zoning changed'));
         this._connectSettingChange(RESTORE_ON_UNTILE_KEY, () => log('Restore on untile changed'));
         this._connectSettingChange(TILE_NEW_WINDOWS_KEY, () => log('Tile new windows changed'));
@@ -115,33 +118,64 @@ export class SettingsManager {
         }
     }
 
-    // New method to load app name exceptions
-    _loadAppNameExceptions() {
-        log(`Attempting to load app name exceptions from ${APP_NAME_EXCEPTIONS_FILENAME}…`);
+    // One-time migration from old JSON file to GSettings
+    _migrateAppNameExceptionsFromFile() {
+        const currentExceptions = this._gsettings.get_string(APP_NAME_EXCEPTIONS_KEY);
+        if (currentExceptions && currentExceptions !== '[]') {
+            log('App name exceptions already exist in GSettings, skipping migration.');
+            return;
+        }
+
+        log(`Attempting to migrate app name exceptions from ${APP_NAME_EXCEPTIONS_FILENAME}…`);
         const file = Gio.File.new_for_path(GLib.build_filenamev([this._extensionPath, APP_NAME_EXCEPTIONS_FILENAME]));
         try {
             if (file.query_exists(null)) {
                 const [ok, contents] = file.load_contents(null);
                 if (ok) {
                     const json = new TextDecoder().decode(contents).trim();
-                    const arr = JSON.parse(json);
-                    // Store names in lowercase for case-insensitive comparison later
-                    this._appNameExceptions = Array.isArray(arr) ? arr.map(name => name.toLowerCase()) : [];
-                    log(`Loaded ${this._appNameExceptions.length} app name exceptions.`);
-                } else {
-                    log(`Could not read ${APP_NAME_EXCEPTIONS_FILENAME}.`);
-                    this._appNameExceptions = [];
+                    const oldExceptions = JSON.parse(json);
+                    if (Array.isArray(oldExceptions)) {
+                        // Convert old format to new format with default word count of 1
+                        const newExceptions = oldExceptions.map(appId => ({
+                            appId: appId,
+                            wordCount: 1
+                        }));
+                        this._gsettings.set_string(APP_NAME_EXCEPTIONS_KEY, JSON.stringify(newExceptions));
+                        log(`Migrated ${newExceptions.length} app name exceptions from file to GSettings.`);
+                    }
                 }
-            } else {
-                log(`${APP_NAME_EXCEPTIONS_FILENAME} not found. No app name exceptions loaded.`);
-                this._appNameExceptions = [];
             }
         } catch (e) {
-            log(`Error loading app name exceptions: ${e}`);
-            this._appNameExceptions = [];
+            log(`Error migrating app name exceptions: ${e}`);
         }
     }
 
+    _loadAppNameExceptionsFromGSettings() {
+        try {
+            const str = this._gsettings.get_string(APP_NAME_EXCEPTIONS_KEY);
+            const arr = JSON.parse(str);
+            
+            if (Array.isArray(arr)) {
+                // Validate format and ensure each entry has required fields
+                this._appNameExceptions = arr.filter(item => 
+                    item && 
+                    typeof item.appId === 'string' && 
+                    typeof item.wordCount === 'number' && 
+                    item.wordCount > 0
+                ).map(item => ({
+                    appId: item.appId.toLowerCase(), // Store in lowercase for comparison
+                    wordCount: Math.max(1, Math.floor(item.wordCount)) // Ensure positive integer
+                }));
+            } else {
+                this._appNameExceptions = [];
+            }
+            
+            log(`Loaded ${this._appNameExceptions.length} app name exceptions from GSettings.`);
+        } catch (e) {
+            log(`Failed to parse app name exceptions JSON: ${e}`);
+            this._appNameExceptions = [];
+        }
+    }
 
     _connectSettingChange(key, callback) {
         const id = this._gsettings.connect(`changed::${key}`, callback);
@@ -167,9 +201,22 @@ export class SettingsManager {
         
     }
 
-    // New getter for app name exceptions
+    // Updated getter returns the full exception objects
     getAppNameExceptions() {
         return this._appNameExceptions;
+    }
+
+    // Helper method to get word count for a specific app ID
+    getAppNameExceptionWordCount(appId) {
+        if (!appId) return null;
+        const exception = this._appNameExceptions.find(ex => ex.appId === appId.toLowerCase());
+        return exception ? exception.wordCount : null;
+    }
+
+    // Helper method to check if an app ID is in exceptions
+    isAppNameException(appId) {
+        if (!appId) return false;
+        return this._appNameExceptions.some(ex => ex.appId === appId.toLowerCase());
     }
 
     isZoningEnabled() {
