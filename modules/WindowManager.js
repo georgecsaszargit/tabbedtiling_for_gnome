@@ -404,23 +404,16 @@ export class WindowManager {
         // Calculate the Y position for the content area (below the tab bar, accounting for gap)
         // The tab bar is placed at the top of the zone definition, relative to monitor.y
         // We need to ensure the tab bar itself also respects the top gap.
-//		const tabBarY = monitor.y + zoneDef.y + zoneGap;
-//        const slotContentY = tabBarY + barHeight - zoneGap/2; // Base content Y from the adjusted tab bar Y (space between the tab and the window ####) 
-//        let slotH = Math.min(zoneDef.height - barHeight - (zoneGap > 0 ? zoneGap : 0) , (monitor.y + monitor.height) - slotContentY);
-const tabBarY = monitor.y + zoneDef.y + zoneGap;
-//const tabBarY = 40;
-const slotContentY = monitor.y + zoneDef.y + zoneGap + barHeight;
-//const slotContentY = 74;
-let slotH = Math.min(zoneDef.height - barHeight - zoneGap, (monitor.y + monitor.height) - slotContentY);
-//let slotH = 1350;
+		const tabBarY = monitor.y + zoneDef.y + zoneGap;
+		const slotContentY = monitor.y + zoneDef.y + zoneGap + barHeight;
+		let slotH = Math.min(zoneDef.height - barHeight - zoneGap, (monitor.y + monitor.height) - slotContentY);
 
         slotH = Math.max(slotH, minWindowDim);
 
         const gappedWindowX = slotX + gapPosOffset;
         let gappedWindowW = Math.max(slotW - gapSizeReduction, minWindowDim);
-        //const gappedWindowY = slotContentY + gapPosOffset;
-const gappedWindowY = slotContentY;
-//const gappedWindowY = 74;
+		const gappedWindowY = slotContentY;
+
         let gappedWindowH = Math.max(slotH - gapSizeReduction, minWindowDim);
 
         // The tabBarX is already adjusted by gapPosOffset from earlier.
