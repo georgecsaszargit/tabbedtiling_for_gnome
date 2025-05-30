@@ -12,7 +12,7 @@ const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator';
 const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator'; 
 const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size'; 
 const SNAP_EVASION_KEY                      = 'snap-evasion-key'; 
-const log = msg => console.log(`[AutoZonerPrefs.GeneralSettings] ${msg}`); 
+const log = msg => console.log(`[TabbedTilingPrefs.GeneralSettings] ${msg}`); 
 
 export function createGeneralSettingsGroup(settings) {
     const group = new Adw.PreferencesGroup({ title: _('General Settings') }); 
@@ -62,7 +62,7 @@ export function createGeneralSettingsGroup(settings) {
             evasionKeyRow.selected = updatedIndex; 
         }
     });
-    // Disconnect signal handled by parent AutoZonerPrefs window closure [cite: 567, 568, 610]
+    // Disconnect signal handled by parent TabbedTilingPrefs window closure [cite: 567, 568, 610]
     group.add(evasionKeyRow); 
 
     // Highlight on Hover

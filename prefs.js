@@ -3,15 +3,15 @@ import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk'; 
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; 
 
-// Import preference group modules
+// Import new preference group modules
 import { createGeneralSettingsGroup } from './preferences/GeneralSettingsGroup.js';
 import { createTabBarSettingsGroup } from './preferences/TabBarSettingsGroup.js';
+import { createTabNamingSettingsGroup } from './preferences/TabNamingSettingsGroup.js';
 import { ZoneDefinitionsGroup } from './preferences/ZoneDefinitionsGroup.js';
 
-const SNAP_EVASION_KEY = 'snap-evasion-key'; 
-const log = msg => console.log(`[AutoZonerPrefs] ${msg}`); 
+const log = msg => console.log(`[TabbedTilingPrefs] ${msg}`); 
 
-export default class AutoZonerPrefs extends ExtensionPreferences {
+export default class TabbedTilingPrefs extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         this._settings = this.getSettings(); 
         this._window = window; 
@@ -19,7 +19,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 
         const display = Gdk.Display.get_default(); 
         const monitorCount = display?.get_monitors().get_n_items() || 1; 
-        
+
         // General Settings Page
         const generalPage = new Adw.PreferencesPage({
             title: _('General'),
@@ -27,22 +27,44 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
         }); 
         window.add(generalPage); 
 
-        // General Settings Group
         const { group: generalGroup, evasionKeySettingChangedId } = createGeneralSettingsGroup(this._settings); 
         generalPage.add(generalGroup);
         this._evasionKeySignalId = evasionKeySettingChangedId;
 
-        // Zone Definitions Group
-        this._zoneDefinitionsManager = new ZoneDefinitionsGroup(this._settings, monitorCount, window);
-        generalPage.add(this._zoneDefinitionsManager.getWidget());
+        // Zone Definitions Page
+        const zonesPage = new Adw.PreferencesPage({
+            title: _('Zones'),
+            icon_name: 'applications-graphics-symbolic'
+        }); 
+        window.add(zonesPage);
 
-        // Tab Bar Settings Page (now includes app exceptions)
-        const tabBarPage = createTabBarSettingsGroup(this._settings, window);
+        this._zoneDefinitionsManager = new ZoneDefinitionsGroup(this._settings, monitorCount, window);
+        const zoneDefinitionsGroup = this._zoneDefinitionsManager.getWidget();
+        zonesPage.add(zoneDefinitionsGroup);
+
+        // Tab Bar Appearance Page
+        const tabBarPage = new Adw.PreferencesPage({
+            title: _('Tab Appearance'),
+            icon_name: 'view-grid-symbolic'
+        }); 
         window.add(tabBarPage);
+
+        const tabBarGroup = createTabBarSettingsGroup(this._settings); 
+        tabBarPage.add(tabBarGroup);
+
+        // Tab Naming Page
+        const tabNamingPage = new Adw.PreferencesPage({
+            title: _('Tab Naming'),
+            icon_name: 'format-text-symbolic'
+        }); 
+        window.add(tabNamingPage);
+
+        const tabNamingGroup = createTabNamingSettingsGroup(this._settings);
+        tabNamingPage.add(tabNamingGroup);
 
         // Disconnect the signal when the preferences window is destroyed
         if (window && typeof window.connect === 'function') { 
-            window.connect('close-request', () => { // Or 'destroy' 
+            window.connect('close-request', () => { 
                 if (this._settings && this._evasionKeySignalId > 0) { 
                     try {
                         this._settings.disconnect(this._evasionKeySignalId); 
@@ -51,6 +73,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
                         log(`Error disconnecting evasionKeySettingChangedId: ${e}`); 
                     }
                 }
+                return false;
             });
         }
     }

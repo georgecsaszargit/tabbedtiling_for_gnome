@@ -9,7 +9,7 @@ import Shell from 'gi://Shell'; // Added for WindowTracker
 
 import { ZoneDetector } from './ZoneDetector.js'; 
 import { TabBar } from './TabBar.js'; 
-const log = (context, msg) => console.log(`[AutoZoner.WindowManager.${context}] ${msg}`); 
+const log = (context, msg) => console.log(`[TabbedTiling.WindowManager.${context}] ${msg}`); 
 const ALL_RESIZING_OPS = Meta.GrabOp.RESIZING_N | Meta.GrabOp.RESIZING_S |
     Meta.GrabOp.RESIZING_E | Meta.GrabOp.RESIZING_W |
     Meta.GrabOp.RESIZING_NW | Meta.GrabOp.RESIZING_NE | 
@@ -168,9 +168,9 @@ export class WindowManager {
         const [, , mods] = global.get_pointer(); 
         const isEvasionKeyHeld = evasionKeyMask !== 0 && (mods & evasionKeyMask) !== 0; 
 
-        delete window._autoZonerEvasionBypass; 
+        delete window._tabbedTilingEvasionBypass; 
         if (isEvasionKeyHeld) { 
-            window._autoZonerEvasionBypass = true; 
+            window._tabbedTilingEvasionBypass = true; 
             const keyName = this._settingsManager.getSnapEvasionKeyName(); 
             log('_onGrabOpBegin', `${keyName} key is held for "${window.get_title()}", bypassing highlights and original rect store.`); 
             this._highlightManager?.stopUpdating(); 
@@ -185,8 +185,8 @@ export class WindowManager {
 
         if (!window || !window.get_compositor_private() || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
             return; 
-        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) { 
-            window._autoZonerOriginalRect = window.get_frame_rect(); 
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._tabbedTilingOriginalRect) { 
+            window._tabbedTilingOriginalRect = window.get_frame_rect(); 
             log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}" during normal move.`); 
         }
         this._highlightManager?.startUpdating(); 
@@ -196,8 +196,8 @@ export class WindowManager {
 
         this._highlightManager?.stopUpdating(); 
 
-        const wasEvasionBypassActiveAtStart = window._autoZonerEvasionBypass; 
-        delete window._autoZonerEvasionBypass; 
+        const wasEvasionBypassActiveAtStart = window._tabbedTilingEvasionBypass; 
+        delete window._tabbedTilingEvasionBypass; 
 
         const evasionKeyMask = this._getEvasionKeyMask(); 
         const [, , modsAtEnd] = global.get_pointer(); 
@@ -205,10 +205,10 @@ export class WindowManager {
         if (isEvasionKeyHeldAtEnd || wasEvasionBypassActiveAtStart) { 
             const keyName = this._settingsManager.getSnapEvasionKeyName(); 
             log('_onGrabOpEnd', `${keyName} key is (or was at start) held for "${window.get_title()}", bypassing snap logic. Window remains at current pos.`); 
-            if (window._autoZonerIsZoned) { 
+            if (window._tabbedTilingIsZoned) { 
                 this._unsnapWindow(window, /* keepCurrentPosition = */ true); 
             } else { 
-                delete window._autoZonerOriginalRect; 
+                delete window._tabbedTilingOriginalRect; 
             }
             return; 
         }
@@ -253,7 +253,7 @@ export class WindowManager {
             const appId = app ? app.get_id() : 'N/A';
             const wmClass = window.get_wm_class() || 'N/A';
             const wmClassInstance = window.get_wm_class_instance() || 'N/A';
-            console.log(`[DEBUG] Window "${window.get_title()}" - Old zone: ${window._autoZonerZoneId}, New zone: ${zoneDef ? (zoneDef.id || zoneDef.name) : 'none'}`);
+            console.log(`[DEBUG] Window "${window.get_title()}" - Old zone: ${window._tabbedTilingZoneId}, New zone: ${zoneDef ? (zoneDef.id || zoneDef.name) : 'none'}`);
         } else { 
             this._unsnapWindow(window); 
         }
@@ -323,7 +323,7 @@ export class WindowManager {
         global.get_window_actors().forEach(actor => { 
             const win = actor.get_meta_window(); 
             // Only process if not already snapped by the logic above
-            if (!win || !win.get_compositor_private() || win._autoZonerIsZoned || win.is_fullscreen() || win.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
+            if (!win || !win.get_compositor_private() || win._tabbedTilingIsZoned || win.is_fullscreen() || win.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
                 return; 
             this._snapWindowByCurrentPosition(win, currentActiveZones);
         });
@@ -362,7 +362,7 @@ export class WindowManager {
 
 	_snapWindowToZone(window, zoneDef, isGrabOpContext = false) { 
         const zoneId = zoneDef.id || zoneDef.name || JSON.stringify(zoneDef);
-        const oldZoneId = window._autoZonerZoneId;
+        const oldZoneId = window._tabbedTilingZoneId;
 
         if (oldZoneId && oldZoneId !== zoneId) {
     // Directly access existing tab bar without repositioning it
@@ -375,8 +375,8 @@ export class WindowManager {
 
         if (window.get_maximized && window.get_maximized())
             window.unmaximize(Meta.MaximizeFlags.BOTH);
-        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
-            window._autoZonerOriginalRect = window.get_frame_rect();
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._tabbedTilingOriginalRect) {
+            window._tabbedTilingOriginalRect = window.get_frame_rect();
             log('_snapWindowToZone', `Stored original rect for "${window.get_title()}"`);
         }
 
@@ -384,8 +384,8 @@ export class WindowManager {
         if (!this._snappedWindows[zoneId].includes(window))
             this._snappedWindows[zoneId].push(window);
         this._cycleIndexByZone[zoneId] = (this._snappedWindows[zoneId].length - 1);
-        window._autoZonerIsZoned = true;
-        window._autoZonerZoneId = zoneId; // zoneId here is zoneDef.id
+        window._tabbedTilingIsZoned = true;
+        window._tabbedTilingZoneId = zoneId; // zoneId here is zoneDef.id
 
         const monitor = Main.layoutManager.monitors[zoneDef.monitorIndex];
         const barHeight = this._settingsManager.getTabBarHeight(); 
@@ -430,7 +430,7 @@ export class WindowManager {
         if (!isGrabOpContext) {
             GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
                 if (window && window.get_compositor_private() && typeof window.get_frame_rect === 'function' &&
-                    window._autoZonerZoneId === zoneId && !window.is_fullscreen() &&
+                    window._tabbedTilingZoneId === zoneId && !window.is_fullscreen() &&
                     window.get_maximized() === Meta.MaximizeFlags.NONE) {
                     const currentRect = window.get_frame_rect();
                     if (currentRect.x !== gappedWindowX || currentRect.y !== gappedWindowY ||
@@ -452,23 +452,23 @@ export class WindowManager {
     }
 
     _unsnapWindow(window, keepCurrentPosition = false) { 
-        const oldZoneId = window._autoZonerZoneId; 
+        const oldZoneId = window._tabbedTilingZoneId; 
         // Only proceed if it was actually zoned OR if we're explicitly keeping position (e.g. Ctrl-drag of a non-zoned window needs its OriginalRect cleared)
         if (!oldZoneId && !keepCurrentPosition) { 
             return; 
         }
         log('_unsnapWindow', `Unsnapping "${window.get_title()}" from zone "${oldZoneId || 'N/A'}". keepCurrentPosition=${keepCurrentPosition}`); 
-        if (!keepCurrentPosition && this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) { 
-            const o = window._autoZonerOriginalRect; 
+        if (!keepCurrentPosition && this._settingsManager.isRestoreOnUntileEnabled() && window._tabbedTilingOriginalRect) { 
+            const o = window._tabbedTilingOriginalRect; 
             window.move_resize_frame(false, o.x, o.y, o.width, o.height); 
-            delete window._autoZonerOriginalRect;  
+            delete window._tabbedTilingOriginalRect;  
         } else if (keepCurrentPosition) { 
-            delete window._autoZonerOriginalRect; 
+            delete window._tabbedTilingOriginalRect; 
         }
 
         if (oldZoneId) {  
-            delete window._autoZonerIsZoned; 
-            delete window._autoZonerZoneId; 
+            delete window._tabbedTilingIsZoned; 
+            delete window._tabbedTilingZoneId; 
 
             const oldZoneDef = this._activeDisplayZones.find(z => z.id === oldZoneId); // Find from active zones 
             if (oldZoneDef) { 
@@ -490,11 +490,11 @@ export class WindowManager {
 
     cycleWindowsInCurrentZone() {
         const focus = global.display.focus_window; 
-        if (!focus || !focus._autoZonerZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
+        if (!focus || !focus._tabbedTilingZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
             log('cycle', 'No valid zoned window focused; aborting.'); 
             return; 
         }
-        const zoneId = focus._autoZonerZoneId; 
+        const zoneId = focus._tabbedTilingZoneId; 
         const list = this._snappedWindows[zoneId] || []; 
         if (list.length < 2) { 
             log('cycle', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`); 
@@ -510,11 +510,11 @@ export class WindowManager {
 
     cycleWindowsInCurrentZoneBackward() {
         const focus = global.display.focus_window; 
-        if (!focus || !focus._autoZonerZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
+        if (!focus || !focus._tabbedTilingZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
             log('cycle-backward', 'No valid zoned window focused; aborting.'); 
             return; 
         }
-        const zoneId = focus._autoZonerZoneId; 
+        const zoneId = focus._tabbedTilingZoneId; 
         const list = this._snappedWindows[zoneId] || []; 
         if (list.length < 2) { 
             log('cycle-backward', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`); 

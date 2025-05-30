@@ -5,7 +5,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js'; // MOVED TO TOP 
 import { gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const ENABLE_ZONING_KEY = 'enable-auto-zoning';
-const log = (msg) => console.log(`[AutoZoner.Indicator] ${msg}`);
+const log = (msg) => console.log(`[TabbedTiling.Indicator] ${msg}`);
 
 export class Indicator {
     constructor(uuid, settingsManager, extensionObject) {
@@ -21,7 +21,7 @@ export class Indicator {
     }
 
     _init() {
-        this._indicator = new PanelMenu.Button(0.5, _('Auto Zoner'), false);
+        this._indicator = new PanelMenu.Button(0.5, _('TabbedTiling'), false);
         const icon = new St.Icon({
             icon_name: 'view-grid-symbolic',
             style_class: 'system-status-icon',

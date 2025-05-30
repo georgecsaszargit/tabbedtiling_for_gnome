@@ -386,31 +386,42 @@ export class TabBar extends St.BoxLayout {
     }
 
     _makeLabelText(win, app) {
+        const appNameExceptions = this._settingsMgr.getAppNameExceptions();
+        const wordCount = this._settingsMgr.getWindowTitleWordCount();
+        let appName = app ? app.get_name() : null;
         let useWindowTitle = false;
-        let wordCount = 1; // Default word count
 		
         if (app) {
             let appID = app.get_id();
-            if (appID && this._settingsMgr.isAppNameException(appID)) {
+            // Check both the original case and lowercase for compatibility
+            if (appID && (appNameExceptions.includes(appID) || appNameExceptions.includes(appID.toLowerCase()))) {
                 useWindowTitle = true;
-                wordCount = this._settingsMgr.getAppNameExceptionWordCount(appID) || 1;
             }
         } 
         
         if (useWindowTitle) {
             const windowTitle = win.get_title();
-            if (windowTitle) {
-                // Take the specified number of words from the window title
-                const words = windowTitle.split(" ");
-                const selectedWords = words.slice(0, wordCount).join(" ");
-                return selectedWords || app?.get_name() || win.get_wm_class() || 'Untitled';
+            if (!windowTitle) {
+                // Fallback if no window title
+                return appName || win.get_wm_class() || 'Untitled';
             }
-            // Fallback if no window title
-            return app?.get_name() || win.get_wm_class() || 'Untitled';
+            
+            if (wordCount === 0) {
+                // Show full window title
+                return windowTitle;
+            } else {
+                // Show specified number of words
+                const words = windowTitle.split(' ');
+                if (words.length > wordCount) {
+                    return words.slice(0, wordCount).join(' ');
+                } else {
+                    return windowTitle;
+                }
+            }
         }
 
         // Original logic if not in exceptions or no app/wmClass
-        if (app?.get_name()) return app.get_name();
+        if (appName) return appName;
         const c = win.get_wm_class();
         return c ? c.replace(/[-_.]+/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) : win.get_title() || 'Untitled';
     }

@@ -1,10 +1,10 @@
 {
-  "name": "Auto Zoner",
-  "description": "Automatically tiles windows into predefined screen zones.",
-  "uuid": "autozoner@georgecs.com",
+  "name": "TabbedTiling",
+  "description": "Automatically tiles windows into predefined screen zones with tabbed interface.",
+  "uuid": "tabbedtiling@georgecs.com",
   "shell-version": ["45", "46", "47", "48"],
   "version": 1,
-  "gettext-domain": "autozoner",
-  "settings-schema": "org.gnome.shell.extensions.autozoner",
-  "url": "https://github.com/your-username/autozoner"
+  "gettext-domain": "tabbedtiling",
+  "settings-schema": "org.gnome.shell.extensions.tabbedtiling",
+  "url": "https://github.com/your-username/tabbedtiling"
 }

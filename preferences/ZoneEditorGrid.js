@@ -3,13 +3,11 @@ import Gtk from 'gi://Gtk';
 import GObject from 'gi://GObject'; 
 import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; 
 
-export class ZoneEditorGrid extends Gtk.Grid {
-    static {
-        GObject.registerClass({ Signals: { 'changed': {} } }, this); 
-    }
-
-    constructor(zoneData, monitorCount) {
-        super({ 
+export const ZoneEditorGrid = GObject.registerClass({
+    Signals: { 'changed': {} }
+}, class ZoneEditorGrid extends Gtk.Grid {
+    _init(zoneData, monitorCount) {
+        super._init({
             column_spacing: 12, 
             row_spacing: 6, 
             margin_top: 10, 
@@ -18,7 +16,9 @@ export class ZoneEditorGrid extends Gtk.Grid {
             margin_end: 10, 
             hexpand: true, 
         });
+        
         this._zone = { ...zoneData }; 
+        
         this.attach(new Gtk.Label({ label: _('Name:'), halign: Gtk.Align.END }), 0, 0, 1, 1); 
         this._nameEntry = new Gtk.Entry({ text: this._zone.name || '', hexpand: true }); 
         this._nameEntry.connect('changed', () => { 
@@ -58,4 +58,4 @@ export class ZoneEditorGrid extends Gtk.Grid {
     get_zone_data() {
         return { ...this._zone }; 
     }
-}
+});

@@ -5,7 +5,7 @@ import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensio
 import { ZoneEditorGrid } from './ZoneEditorGrid.js'; // Assuming ZoneEditorGrid.js is in the same directory
 
 const ZONE_SETTINGS_KEY = 'zones'; 
-const log = msg => console.log(`[AutoZonerPrefs.ZoneDefs] ${msg}`); 
+const log = msg => console.log(`[TabbedTilingPrefs.ZoneDefs] ${msg}`); 
 
 export class ZoneDefinitionsGroup {
     constructor(settings, monitorCount, window) {
@@ -15,8 +15,11 @@ export class ZoneDefinitionsGroup {
 
         this.group = new Adw.PreferencesGroup({ 
             title: _('Zone Definitions'), 
-            description: _('Define screen areas where windows will tile automatically.') 
+            description: _('Define screen areas where windows will tile automatically. Use work area coordinates (excluding panels and docks).') 
         });
+
+        // Add usage instructions
+        this._addUsageInstructions();
 
         this._addButtonRow = new Adw.ActionRow(); 
         const addButton = new Gtk.Button({ 
@@ -28,6 +31,48 @@ export class ZoneDefinitionsGroup {
         this._addButtonRow.set_child(addButton); 
 
         this._loadZonesToUI();
+    }
+
+    _addUsageInstructions() {
+        const instructionsRow = new Adw.ActionRow({
+            title: _('Zone Definition Tips'),
+            subtitle: _('Click to view detailed instructions for defining zones')
+        });
+
+        const helpButton = new Gtk.Button({
+            icon_name: 'help-browser-symbolic',
+            valign: Gtk.Align.CENTER,
+            tooltip_text: _('Show zone definition help'),
+            css_classes: ['flat', 'circular']
+        });
+
+        helpButton.connect('clicked', () => {
+            const helpText = "Zone coordinates must be relative to the work area (excluding GNOME panels and docks).\n\n" +
+                "Key Points:\n" +
+                "• X, Y: Position from top-left of work area (not full screen)\n" +
+                "• Width, Height: Zone dimensions in pixels\n" +
+                "• Monitor Index: 0 = primary monitor, 1 = secondary, etc.\n" +
+                "• Use gaps setting for spacing between zones\n\n" +
+                "Example for 1920x1080 screen with 32px top panel:\n" +
+                "• Work area: 1920 x 1048 pixels\n" +
+                "• Left half zone: X=0, Y=0, W=960, H=1048\n" +
+                "• Right half zone: X=960, Y=0, W=960, H=1048\n\n" +
+                "Tip: Test your zones by dragging windows after defining them.";
+            
+            const dialog = new Adw.MessageDialog({
+                heading: _("Zone Definition Guide"),
+                body: helpText,
+                transient_for: this._window.get_root(),
+                modal: true
+            });
+            dialog.add_response("ok", _("Got it"));
+            dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED);
+            dialog.connect("response", (d) => d.destroy());
+            dialog.present();
+        });
+
+        instructionsRow.add_suffix(helpButton);
+        this.group.add(instructionsRow);
     }
 
     getWidget() {
@@ -48,7 +93,6 @@ export class ZoneDefinitionsGroup {
         if (this._addButtonRow.get_parent() === this.group) { 
             this.group.remove(this._addButtonRow); 
         }
-
 
         let zones = []; 
         try {
@@ -90,7 +134,7 @@ export class ZoneDefinitionsGroup {
         removeButton.connect('clicked', () => {
             const dialog = new Adw.MessageDialog({
                 heading: _("Remove Zone?"),
-                body:    _("Are you sure you want to remove “%s”?").format(expanderRow.title),
+                body: _("Are you sure you want to remove this zone?"),
                 transient_for: this._window.get_root(),
                 modal: true
             });
@@ -102,7 +146,7 @@ export class ZoneDefinitionsGroup {
                     this.group.remove(expanderRow);
                     this._saveZones();
                 }
-                d.destroy(); // Make sure to destroy the dialog
+                d.destroy();
             });
             dialog.present();
         });
@@ -116,7 +160,9 @@ export class ZoneDefinitionsGroup {
         let current = []; 
         try {
             current = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)) || []; 
-        } catch {} 
+        } catch (e) {
+            // Handle parsing error
+        }
         const idx = current.length + 1; 
         const newZone = { 
             monitorIndex: 0, // Default to first monitor

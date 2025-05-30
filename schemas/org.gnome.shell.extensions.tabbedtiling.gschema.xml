@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist gettext-domain="gnome-shell-extensions">
-  <schema path="/org/gnome/shell/extensions/autozoner/" id="org.gnome.shell.extensions.autozoner">
+  <schema path="/org/gnome/shell/extensions/tabbedtiling/" id="org.gnome.shell.extensions.tabbedtiling">
     <key name="enable-auto-zoning" type="b">
       <default>true</default>
       <summary>Enable Auto Zoning</summary>
@@ -10,7 +10,7 @@
     <key name="zones" type="s">
       <default>'[]'</default>
       <summary>Zone Definitions</summary>
-      <description>A JSON string representing an array of zone objects.</description>
+      <description>A JSON string representing an array of zone objects. Coordinates should be relative to the work area (excluding panels and docks).</description>
     </key>
 
     <key name="restore-original-size-on-untile" type="b">
@@ -97,12 +97,6 @@
       <description>Maximum width in pixels for an individual tab.</description>
     </key>
 
-    <key name="app-name-exceptions" type="s">
-      <default>'[]'</default>
-      <summary>App Name Exceptions</summary>
-      <description>A JSON string representing an array of app exceptions with word counts for tab labels.</description>
-    </key>
-
     <key name="snap-evasion-key" type="s">
       <default>'control'</default>
       <summary>Snap Evasion Key</summary>
@@ -114,6 +108,19 @@
         <choice value='shift'/>
         <choice value='super'/>
       </choices>
+    </key>
+
+    <key name="app-name-exceptions" type="as">
+      <default>['virt-manager.desktop']</default>
+      <summary>App Name Exceptions</summary>
+      <description>List of application IDs that should show window title instead of app name in tabs.</description>
+    </key>
+
+    <key name="window-title-word-count" type="i">
+      <default>1</default>
+      <summary>Window Title Word Count</summary>
+      <description>Number of words from the window title to show in tabs for applications in the exceptions list. Set to 0 to show the full title.</description>
+      <range min="0" max="10"/>
     </key>
 
   </schema>
