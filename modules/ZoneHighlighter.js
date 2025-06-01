@@ -3,7 +3,7 @@ import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const log = (msg) => console.log(`[AutoZoner.ZoneHighlighter] ${msg}`);
+const log = (msg) => console.log(`[TabbedTilingPrefs.ZoneHighlighter] ${msg}`);
 
 export class ZoneHighlighter extends St.Bin {
     static {

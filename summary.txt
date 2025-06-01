@@ -3,10 +3,10 @@
 
 
 
-===== FILE: ./schemas/org.gnome.shell.extensions.autozoner.gschema.xml =====
+===== FILE: ./schemas/org.gnome.shell.extensions.tabbedtiling.gschema.xml =====
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist gettext-domain="gnome-shell-extensions">
-  <schema path="/org/gnome/shell/extensions/autozoner/" id="org.gnome.shell.extensions.autozoner">
+  <schema path="/org/gnome/shell/extensions/tabbedtiling/" id="org.gnome.shell.extensions.tabbedtiling">
     <key name="enable-auto-zoning" type="b">
       <default>true</default>
       <summary>Enable Auto Zoning</summary>
@@ -16,7 +16,7 @@
     <key name="zones" type="s">
       <default>'[]'</default>
       <summary>Zone Definitions</summary>
-      <description>A JSON string representing an array of zone objects.</description>
+      <description>A JSON string representing an array of zone objects. Coordinates should be relative to the work area (excluding panels and docks).</description>
     </key>
 
     <key name="restore-original-size-on-untile" type="b">
@@ -116,6 +116,19 @@
       </choices>
     </key>
 
+    <key name="app-name-exceptions" type="as">
+      <default>['virt-manager.desktop']</default>
+      <summary>App Name Exceptions</summary>
+      <description>List of application IDs that should show window title instead of app name in tabs.</description>
+    </key>
+
+    <key name="window-title-word-count" type="i">
+      <default>1</default>
+      <summary>Window Title Word Count</summary>
+      <description>Number of words from the window title to show in tabs for applications in the exceptions list. Set to 0 to show the full title.</description>
+      <range min="0" max="10"/>
+    </key>
+
   </schema>
 </schemalist>
 
@@ -123,14 +136,14 @@
 
 ===== FILE: ./metadata.json =====
 {
-  "name": "Auto Zoner",
-  "description": "Automatically tiles windows into predefined screen zones.",
-  "uuid": "autozoner@georgecs.com",
+  "name": "TabbedTiling",
+  "description": "Automatically tiles windows into predefined screen zones with tabbed interface.",
+  "uuid": "tabbedtiling@georgecs.com",
   "shell-version": ["45", "46", "47", "48"],
   "version": 1,
-  "gettext-domain": "autozoner",
-  "settings-schema": "org.gnome.shell.extensions.autozoner",
-  "url": "https://github.com/your-username/autozoner"
+  "gettext-domain": "tabbedtiling",
+  "settings-schema": "org.gnome.shell.extensions.tabbedtiling",
+  "url": "https://github.com/your-username/tabbedtiling"
 }
 
 
@@ -149,6 +162,7 @@ import { SettingsManager } from './modules/SettingsManager.js';
 import { HighlightManager } from './modules/HighlightManager.js'; 
 import { WindowManager } from './modules/WindowManager.js'; 
 import { Indicator } from './modules/Indicator.js'; 
+
 const ENABLE_ZONING_KEY = 'enable-auto-zoning'; 
 const CYCLE_ACCELERATOR_KEY = 'cycle-zone-windows-accelerator'; 
 const CYCLE_BACKWARD_ACCELERATOR_KEY = 'cycle-zone-windows-backward-accelerator'; 
@@ -162,9 +176,9 @@ const TAB_SPACING_KEY = 'tab-spacing';
 const TAB_MIN_WIDTH_KEY = 'tab-min-width'; 
 const TAB_MAX_WIDTH_KEY = 'tab-max-width'; 
 const TAB_FONT_SIZE_KEY = 'tab-font-size'; 
-// Already existed but good to have with other tab keys 
+// Already existed but good to have with other tab keys
 
-const log = msg => console.log(`[AutoZoner.Main] ${msg}`); 
+const log = msg => console.log(`[TabbedTiling.Main] ${msg}`);
 const SessionManagerIface = `
 <node>
     <interface name="org.gnome.SessionManager">
@@ -173,7 +187,7 @@ const SessionManagerIface = `
 </node>`; 
 const SessionManagerProxy = Gio.DBusProxy.makeProxyWrapper(SessionManagerIface); 
 
-export default class AutoZonerExtension extends Extension {
+export default class TabbedTilingExtension extends Extension {
     constructor(metadata) {
         super(metadata); 
         this._settingsManager = null; 
@@ -223,7 +237,7 @@ export default class AutoZonerExtension extends Extension {
         this._highlightManager = new HighlightManager(this._settingsManager); 
         this._windowManager = new WindowManager(this._settingsManager, this._highlightManager); 
         this._indicator = new Indicator(this.uuid, this._settingsManager, this); 
-        this._windowManager.connectSignals(); 
+        this._windowManager.connectSignals();
         if (this._settingsManager.isZoningEnabled()) { 
             GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 300, () => { 
                 if (this._settingsManager && this._settingsManager.isZoningEnabled() && this._windowManager) { 
@@ -506,13 +520,11 @@ import Gtk from 'gi://Gtk';
 import GObject from 'gi://GObject'; 
 import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; 
 
-export class ZoneEditorGrid extends Gtk.Grid {
-    static {
-        GObject.registerClass({ Signals: { 'changed': {} } }, this); 
-    }
-
-    constructor(zoneData, monitorCount) {
-        super({ 
+export const ZoneEditorGrid = GObject.registerClass({
+    Signals: { 'changed': {} }
+}, class ZoneEditorGrid extends Gtk.Grid {
+    _init(zoneData, monitorCount) {
+        super._init({
             column_spacing: 12, 
             row_spacing: 6, 
             margin_top: 10, 
@@ -521,7 +533,9 @@ export class ZoneEditorGrid extends Gtk.Grid {
             margin_end: 10, 
             hexpand: true, 
         });
+        
         this._zone = { ...zoneData }; 
+        
         this.attach(new Gtk.Label({ label: _('Name:'), halign: Gtk.Align.END }), 0, 0, 1, 1); 
         this._nameEntry = new Gtk.Entry({ text: this._zone.name || '', hexpand: true }); 
         this._nameEntry.connect('changed', () => { 
@@ -561,7 +575,7 @@ export class ZoneEditorGrid extends Gtk.Grid {
     get_zone_data() {
         return { ...this._zone }; 
     }
-}
+});
 
 
 
@@ -580,7 +594,7 @@ const CYCLE_ACCELERATOR_KEY                 = 'cycle-zone-windows-accelerator';
 const CYCLE_BACKWARD_ACCELERATOR_KEY        = 'cycle-zone-windows-backward-accelerator'; 
 const ZONE_GAP_SIZE_KEY                     = 'zone-gap-size'; 
 const SNAP_EVASION_KEY                      = 'snap-evasion-key'; 
-const log = msg => console.log(`[AutoZonerPrefs.GeneralSettings] ${msg}`); 
+const log = msg => console.log(`[TabbedTilingPrefs.GeneralSettings] ${msg}`); 
 
 export function createGeneralSettingsGroup(settings) {
     const group = new Adw.PreferencesGroup({ title: _('General Settings') }); 
@@ -630,7 +644,7 @@ export function createGeneralSettingsGroup(settings) {
             evasionKeyRow.selected = updatedIndex; 
         }
     });
-    // Disconnect signal handled by parent AutoZonerPrefs window closure [cite: 567, 568, 610]
+    // Disconnect signal handled by parent TabbedTilingPrefs window closure [cite: 567, 568, 610]
     group.add(evasionKeyRow); 
 
     // Highlight on Hover
@@ -730,6 +744,244 @@ export function createGeneralSettingsGroup(settings) {
 
 
 
+===== FILE: ./preferences/TabNamingSettingsGroup.js =====
+// ./preferences/TabNamingSettingsGroup.js
+import Adw from 'gi://Adw'; 
+import Gtk from 'gi://Gtk'; 
+import Gio from 'gi://Gio'; 
+import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; 
+
+const APP_NAME_EXCEPTIONS_KEY = 'app-name-exceptions';
+const WINDOW_TITLE_WORD_COUNT_KEY = 'window-title-word-count';
+const log = msg => console.log(`[TabbedTilingPrefs.TabNaming] ${msg}`); 
+
+export function createTabNamingSettingsGroup(settings) {
+    const group = new Adw.PreferencesGroup({ 
+        title: _('Tab Naming Behavior'),
+        description: _('Configure how tab labels are displayed for different applications')
+    }); 
+
+    // Information section
+    const infoRow = new Adw.ActionRow({
+        title: _('How Tab Naming Works'),
+        subtitle: _('Click to learn about tab naming behavior and configuration')
+    });
+
+    const infoButton = new Gtk.Button({
+        icon_name: 'help-browser-symbolic',
+        valign: Gtk.Align.CENTER,
+        tooltip_text: _('Show tab naming help'),
+        css_classes: ['flat', 'circular']
+    });
+
+    infoButton.connect('clicked', () => {
+        _showTabNamingHelpDialog(infoRow.get_root());
+    });
+
+    infoRow.add_suffix(infoButton);
+    group.add(infoRow);
+
+    // Window Title Word Count
+    const wordCountSpin = Gtk.SpinButton.new_with_range(0, 10, 1); 
+    settings.bind(WINDOW_TITLE_WORD_COUNT_KEY, wordCountSpin, 'value', Gio.SettingsBindFlags.DEFAULT); 
+    const wordCountRow = new Adw.ActionRow({ 
+        title: _('Window Title Word Count'), 
+        subtitle: _('Number of words to show from window title (0 = show full title)'), 
+        activatable_widget: wordCountSpin 
+    });
+    wordCountRow.add_suffix(wordCountSpin); 
+    group.add(wordCountRow); 
+
+    // Add input row for new exceptions
+    const addExceptionRow = new Adw.ActionRow({
+        title: _('Add New Exception'),
+        subtitle: _('Enter application ID (e.g., org.gnome.TextEditor)')
+    });
+
+    const exceptionEntry = new Gtk.Entry({
+        placeholder_text: _('Application ID'),
+        hexpand: true
+    });
+
+    const addButton = new Gtk.Button({
+        label: _('Add'),
+        valign: Gtk.Align.CENTER,
+        css_classes: ['suggested-action']
+    });
+
+    addButton.connect('clicked', () => {
+        const appId = exceptionEntry.get_text().trim();
+        if (appId && _addAppIdToExceptions(settings, appId)) {
+            exceptionEntry.set_text('');
+            _refreshExceptionsList(settings, group, addExceptionRow);
+        }
+    });
+
+    // Allow Enter key to add exception
+    exceptionEntry.connect('activate', () => {
+        addButton.emit('clicked');
+    });
+
+    addExceptionRow.add_suffix(exceptionEntry);
+    addExceptionRow.add_suffix(addButton);
+    group.add(addExceptionRow);
+
+    // Load existing exceptions
+    _refreshExceptionsList(settings, group, addExceptionRow);
+
+    return group;
+}
+
+function _showTabNamingHelpDialog(parentWindow) {
+    const helpText = `Tab Naming Behavior Explained:
+
+DEFAULT BEHAVIOR:
+• Most applications show their app name in tabs
+• Example: "Firefox" for all Firefox windows
+• Example: "Files" for all file manager windows
+
+EXCEPTION BEHAVIOR:
+• Applications in the exceptions list show window titles instead
+• Useful for apps where the window title is more descriptive
+• Example: Text editors showing document names
+• Example: Terminals showing current directory
+
+WORD COUNT SETTING:
+• Controls how many words from window title to show
+• 0 = Show full window title
+• 1 = Show first word only (e.g., "document.txt" → "document.txt")
+• 2 = Show first two words (e.g., "My Document - TextEditor" → "My Document")
+• 3+ = Show specified number of words
+
+EXAMPLES:
+
+Normal App (Firefox):
+• Tab shows: "Firefox" (always the same)
+
+Exception App (Text Editor):
+• Window title: "document.txt - Text Editor"
+• Word count 1: Tab shows "document.txt"
+• Word count 2: Tab shows "document.txt -"
+• Word count 0: Tab shows "document.txt - Text Editor"
+
+Exception App (Terminal):
+• Window title: "user@hostname: /home/user/projects"
+• Word count 1: Tab shows "user@hostname:"
+• Word count 3: Tab shows "user@hostname: /home/user/projects"
+
+APPLICATION IDs:
+• Use the .desktop file name (e.g., "firefox.desktop")
+• Or use the application ID (e.g., "org.gnome.TextEditor")
+• Find app IDs using: "ps aux | grep [app-name]" or looking in /usr/share/applications/`;
+
+    const dialog = new Adw.MessageDialog({
+        heading: _("Tab Naming Configuration Guide"),
+        body: helpText,
+        transient_for: parentWindow,
+        modal: true
+    });
+    dialog.add_response("ok", _("Got it"));
+    dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED);
+    dialog.connect("response", (d) => d.destroy());
+    dialog.present();
+}
+
+function _isAppIdInExceptions(settings, appId) {
+    const exceptions = settings.get_strv(APP_NAME_EXCEPTIONS_KEY);
+    return exceptions.includes(appId); // Keep original case for exact match
+}
+
+function _addAppIdToExceptions(settings, appId) {
+    const exceptions = settings.get_strv(APP_NAME_EXCEPTIONS_KEY);
+    if (!exceptions.includes(appId)) { // Prevent duplicates
+        exceptions.push(appId);
+        settings.set_strv(APP_NAME_EXCEPTIONS_KEY, exceptions);
+        log(`Added app ID to exceptions: ${appId}`);
+        return true;
+    }
+    return false;
+}
+
+function _removeAppIdFromExceptions(settings, appId) {
+    const exceptions = settings.get_strv(APP_NAME_EXCEPTIONS_KEY);
+    const filtered = exceptions.filter(id => id !== appId);
+    settings.set_strv(APP_NAME_EXCEPTIONS_KEY, filtered);
+    log(`Removed app ID from exceptions: ${appId}`);
+}
+
+function _refreshExceptionsList(settings, group, addExceptionRow) {
+    // Use a small delay to ensure GSettings changes are propagated
+    setTimeout(() => {
+        _doRefreshExceptionsList(settings, group, addExceptionRow);
+    }, 100);
+}
+
+function _doRefreshExceptionsList(settings, group, addExceptionRow) {
+    // Remove all exception rows except the fixed rows (info, word count, add row)
+    let child = group.get_first_child();
+    while (child) {
+        const next = child.get_next_sibling();
+        if (child instanceof Adw.ActionRow) {
+            const title = child.title || '';
+            if (title.includes('How Tab Naming Works') || title.includes('Window Title Word Count') || title.includes('Add New Exception')) {
+                // Keep these fixed rows
+            } else {
+                // This is an exception row, remove it
+                group.remove(child);
+            }
+        }
+        child = next;
+    }
+
+    // Get fresh data from GSettings
+    const exceptions = settings.get_strv(APP_NAME_EXCEPTIONS_KEY);
+    log(`Refreshing with ${exceptions.length} exceptions: ${exceptions.join(', ')}`);
+    
+    exceptions.forEach(appId => {
+        const exceptionRow = new Adw.ActionRow({
+            title: appId,
+            subtitle: _('Shows window title instead of app name')
+        });
+
+        // Create a more visible delete button
+        const removeButton = new Gtk.Button({
+            label: _('Remove'),
+            valign: Gtk.Align.CENTER,
+            tooltip_text: _('Remove this exception'),
+            css_classes: ['destructive-action']
+        });
+
+        removeButton.connect('clicked', () => {
+            log(`User clicked remove for: ${appId}`);
+            _removeAppIdFromExceptions(settings, appId);
+            _refreshExceptionsList(settings, group, addExceptionRow);
+        });
+
+        exceptionRow.add_suffix(removeButton);
+        exceptionRow.set_activatable_widget(null);
+        
+        // Add the row to the group
+        group.add(exceptionRow);
+        
+        log(`Added exception row for: ${appId}`);
+    });
+}
+
+function _getChildPosition(parent, child) {
+    let position = 0;
+    let currentChild = parent.get_first_child();
+    while (currentChild) {
+        if (currentChild === child) {
+            return position;
+        }
+        currentChild = currentChild.get_next_sibling();
+        position++;
+    }
+    return -1;
+}
+
+
+
 ===== FILE: ./preferences/ZoneDefinitionsGroup.js =====
 // ./preferences/ZoneDefinitionsGroup.js
 import Adw from 'gi://Adw'; 
@@ -738,7 +990,7 @@ import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensio
 import { ZoneEditorGrid } from './ZoneEditorGrid.js'; // Assuming ZoneEditorGrid.js is in the same directory
 
 const ZONE_SETTINGS_KEY = 'zones'; 
-const log = msg => console.log(`[AutoZonerPrefs.ZoneDefs] ${msg}`); 
+const log = msg => console.log(`[TabbedTilingPrefs.ZoneDefs] ${msg}`); 
 
 export class ZoneDefinitionsGroup {
     constructor(settings, monitorCount, window) {
@@ -748,8 +1000,11 @@ export class ZoneDefinitionsGroup {
 
         this.group = new Adw.PreferencesGroup({ 
             title: _('Zone Definitions'), 
-            description: _('Define screen areas where windows will tile automatically.') 
+            description: _('Define screen areas where windows will tile automatically. Use work area coordinates (excluding panels and docks).') 
         });
+
+        // Add usage instructions
+        this._addUsageInstructions();
 
         this._addButtonRow = new Adw.ActionRow(); 
         const addButton = new Gtk.Button({ 
@@ -761,6 +1016,48 @@ export class ZoneDefinitionsGroup {
         this._addButtonRow.set_child(addButton); 
 
         this._loadZonesToUI();
+    }
+
+    _addUsageInstructions() {
+        const instructionsRow = new Adw.ActionRow({
+            title: _('Zone Definition Tips'),
+            subtitle: _('Click to view detailed instructions for defining zones')
+        });
+
+        const helpButton = new Gtk.Button({
+            icon_name: 'help-browser-symbolic',
+            valign: Gtk.Align.CENTER,
+            tooltip_text: _('Show zone definition help'),
+            css_classes: ['flat', 'circular']
+        });
+
+        helpButton.connect('clicked', () => {
+            const helpText = "Zone coordinates must be relative to the work area (excluding GNOME panels and docks).\n\n" +
+                "Key Points:\n" +
+                "• X, Y: Position from top-left of work area (not full screen)\n" +
+                "• Width, Height: Zone dimensions in pixels\n" +
+                "• Monitor Index: 0 = primary monitor, 1 = secondary, etc.\n" +
+                "• Use gaps setting for spacing between zones\n\n" +
+                "Example for 1920x1080 screen with 32px top panel:\n" +
+                "• Work area: 1920 x 1048 pixels\n" +
+                "• Left half zone: X=0, Y=0, W=960, H=1048\n" +
+                "• Right half zone: X=960, Y=0, W=960, H=1048\n\n" +
+                "Tip: Test your zones by dragging windows after defining them.";
+            
+            const dialog = new Adw.MessageDialog({
+                heading: _("Zone Definition Guide"),
+                body: helpText,
+                transient_for: this._window.get_root(),
+                modal: true
+            });
+            dialog.add_response("ok", _("Got it"));
+            dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED);
+            dialog.connect("response", (d) => d.destroy());
+            dialog.present();
+        });
+
+        instructionsRow.add_suffix(helpButton);
+        this.group.add(instructionsRow);
     }
 
     getWidget() {
@@ -781,7 +1078,6 @@ export class ZoneDefinitionsGroup {
         if (this._addButtonRow.get_parent() === this.group) { 
             this.group.remove(this._addButtonRow); 
         }
-
 
         let zones = []; 
         try {
@@ -823,7 +1119,7 @@ export class ZoneDefinitionsGroup {
         removeButton.connect('clicked', () => {
             const dialog = new Adw.MessageDialog({
                 heading: _("Remove Zone?"),
-                body:    _("Are you sure you want to remove “%s”?").format(expanderRow.title),
+                body: _("Are you sure you want to remove this zone?"),
                 transient_for: this._window.get_root(),
                 modal: true
             });
@@ -835,7 +1131,7 @@ export class ZoneDefinitionsGroup {
                     this.group.remove(expanderRow);
                     this._saveZones();
                 }
-                d.destroy(); // Make sure to destroy the dialog
+                d.destroy();
             });
             dialog.present();
         });
@@ -849,7 +1145,9 @@ export class ZoneDefinitionsGroup {
         let current = []; 
         try {
             current = JSON.parse(this._settings.get_string(ZONE_SETTINGS_KEY)) || []; 
-        } catch {} 
+        } catch (e) {
+            // Handle parsing error
+        }
         const idx = current.length + 1; 
         const newZone = { 
             monitorIndex: 0, // Default to first monitor
@@ -881,6 +1179,554 @@ export class ZoneDefinitionsGroup {
 
 
 
+===== FILE: ./preferences/AppExceptionsEditor.js =====
+// ./preferences/AppExceptionsEditor.js
+import Adw from 'gi://Adw';
+import Gtk from 'gi://Gtk';
+import GObject from 'gi://GObject';
+import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+
+const APP_NAME_EXCEPTIONS_KEY = 'app-name-exceptions';
+const log = msg => console.log(`[AutoZonerPrefs.AppExceptionsEditor] ${msg}`);
+
+export class AppExceptionEditorRow extends Adw.ActionRow {
+    static {
+        GObject.registerClass({
+            Signals: {
+                'remove-requested': {},
+                'changed': {}
+            }
+        }, this);
+    }
+
+    constructor(exceptionData) {
+        super({
+            title: exceptionData.appId || _('New Exception'),
+        });
+
+        this._data = { ...exceptionData };
+
+        // App ID Entry
+        this._appIdEntry = new Gtk.Entry({
+            text: this._data.appId || '',
+            placeholder_text: _('e.g., firefox.desktop'),
+            hexpand: true,
+            tooltip_text: _('The application ID (usually ends with .desktop)')
+        });
+        this._appIdEntry.connect('changed', () => {
+            this._data.appId = this._appIdEntry.get_text();
+            this.title = this._data.appId || _('New Exception');
+            this.emit('changed');
+        });
+
+        // Word Count Spin Button
+        this._wordCountSpin = Gtk.SpinButton.new_with_range(1, 10, 1);
+        this._wordCountSpin.set_value(this._data.wordCount || 1);
+        this._wordCountSpin.set_tooltip_text(_('Number of words to take from window title'));
+        this._wordCountSpin.connect('value-changed', () => {
+            this._data.wordCount = this._wordCountSpin.get_value_as_int();
+            this.emit('changed');
+        });
+
+        // Remove Button
+        const removeButton = new Gtk.Button({
+            icon_name: 'edit-delete-symbolic',
+            valign: Gtk.Align.CENTER,
+            tooltip_text: _('Remove this exception'),
+            css_classes: ['flat', 'circular', 'destructive-action']
+        });
+        removeButton.connect('clicked', () => {
+            this.emit('remove-requested');
+        });
+
+        // Layout
+        const contentBox = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 12,
+            margin_top: 6,
+            margin_bottom: 6,
+            margin_start: 6,
+            margin_end: 6
+        });
+
+        const appIdBox = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 3,
+            hexpand: true
+        });
+        appIdBox.append(new Gtk.Label({
+            label: _('Application ID:'),
+            halign: Gtk.Align.START,
+            css_classes: ['caption']
+        }));
+        appIdBox.append(this._appIdEntry);
+
+        const wordCountBox = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 3
+        });
+        wordCountBox.append(new Gtk.Label({
+            label: _('Words:'),
+            halign: Gtk.Align.START,
+            css_classes: ['caption']
+        }));
+        wordCountBox.append(this._wordCountSpin);
+
+        contentBox.append(appIdBox);
+        contentBox.append(wordCountBox);
+        contentBox.append(removeButton);
+
+        this.set_child(contentBox);
+        this.set_activatable_widget(this._appIdEntry);
+    }
+
+    getData() {
+        return { ...this._data };
+    }
+
+    isValid() {
+        return this._data.appId && this._data.appId.trim().length > 0 && this._data.wordCount > 0;
+    }
+}
+
+export class AppExceptionsEditor {
+    constructor(settings, window) {
+        this._settings = settings;
+        this._window = window;
+        
+        this.group = new Adw.PreferencesGroup({
+            title: _('Application Name Exceptions'),
+            description: _('Configure which applications should use window titles instead of application names in tab labels, and specify how many words to display from the title.')
+        });
+
+        this._listBox = new Gtk.ListBox({
+            selection_mode: Gtk.SelectionMode.NONE,
+            css_classes: ['boxed-list']
+        });
+
+        this._addButton = new Gtk.Button({
+            label: _('Add Exception'),
+            halign: Gtk.Align.CENTER,
+            css_classes: ['suggested-action'],
+            margin_top: 12
+        });
+        this._addButton.connect('clicked', () => this._addException());
+
+        // Info section with examples
+        const infoExpander = new Adw.ExpanderRow({
+            title: _('How it works'),
+            subtitle: _('Click to see examples and explanation')
+        });
+
+        const infoBox = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 12,
+            margin_top: 12,
+            margin_bottom: 12,
+            margin_start: 12,
+            margin_end: 12
+        });
+
+        const explanationLabel = new Gtk.Label({
+            label: _('By default, tabs show the application name (e.g., "Firefox" for all Firefox windows). ' +
+                   'Exceptions allow specific applications to show part of their window title instead.\n\n' +
+                   'Examples:\n' +
+                   '• firefox.desktop with 2 words: "Gmail - Mozilla" → "Gmail -"\n' +
+                   '• code.desktop with 1 word: "main.js - Visual Studio Code" → "main.js"\n' +
+                   '• virt-manager.desktop with 3 words: "Ubuntu 20.04 - Virtual Machine Manager" → "Ubuntu 20.04 -"'),
+            wrap: true,
+            xalign: 0,
+            css_classes: ['body']
+        });
+
+        const findAppIdLabel = new Gtk.Label({
+            label: _('<b>Finding Application IDs:</b>\nRun <tt>ls /usr/share/applications/</tt> in terminal, or check the app\'s .desktop file name.'),
+            wrap: true,
+            use_markup: true,
+            xalign: 0,
+            css_classes: ['caption']
+        });
+
+        infoBox.append(explanationLabel);
+        infoBox.append(new Gtk.Separator());
+        infoBox.append(findAppIdLabel);
+        infoExpander.add_row(new Adw.ActionRow({ child: infoBox }));
+
+        // Add components to group
+        this.group.add(infoExpander);
+        this.group.add(this._listBox);
+        this.group.add(this._addButton);
+
+        this._loadExceptions();
+    }
+
+    getWidget() {
+        return this.group;
+    }
+
+    _loadExceptions() {
+        // Clear existing rows
+        let child = this._listBox.get_first_child();
+        while (child) {
+            const next = child.get_next_sibling();
+            this._listBox.remove(child);
+            child = next;
+        }
+
+        let exceptions = [];
+        try {
+            const str = this._settings.get_string(APP_NAME_EXCEPTIONS_KEY);
+            exceptions = JSON.parse(str);
+            if (!Array.isArray(exceptions)) exceptions = [];
+        } catch (e) {
+            log(`Error parsing exceptions JSON: ${e}`);
+            exceptions = [];
+        }
+
+        exceptions.forEach(exceptionData => {
+            this._createAndAddExceptionRow(exceptionData);
+        });
+
+        log(`Loaded ${exceptions.length} exceptions into GUI.`);
+    }
+
+    _createAndAddExceptionRow(exceptionData) {
+        const row = new AppExceptionEditorRow(exceptionData);
+        
+        row.connect('changed', () => {
+            this._saveExceptions();
+        });
+
+        row.connect('remove-requested', () => {
+            const dialog = new Adw.MessageDialog({
+                heading: _('Remove Exception?'),
+                body: _('Are you sure you want to remove the exception for "%s"?').format(exceptionData.appId || _('this application')),
+                transient_for: this._window.get_root(),
+                modal: true
+            });
+            dialog.add_response('cancel', _('Cancel'));
+            dialog.add_response('remove', _('Remove'));
+            dialog.set_response_appearance('remove', Adw.ResponseAppearance.DESTRUCTIVE);
+            
+            dialog.connect('response', (d, resp) => {
+                if (resp === 'remove') {
+                    this._listBox.remove(row);
+                    this._saveExceptions();
+                }
+                d.destroy();
+            });
+            dialog.present();
+        });
+
+        this._listBox.append(row);
+    }
+
+    _addException() {
+        const newException = {
+            appId: '',
+            wordCount: 1
+        };
+        this._createAndAddExceptionRow(newException);
+        this._saveExceptions();
+    }
+
+    _saveExceptions() {
+        const exceptions = [];
+        let child = this._listBox.get_first_child();
+        
+        while (child) {
+            if (child instanceof AppExceptionEditorRow) {
+                const data = child.getData();
+                if (child.isValid()) {
+                    exceptions.push({
+                        appId: data.appId.trim(),
+                        wordCount: Math.max(1, Math.floor(data.wordCount))
+                    });
+                }
+            }
+            child = child.get_next_sibling();
+        }
+
+        this._settings.set_string(APP_NAME_EXCEPTIONS_KEY, JSON.stringify(exceptions));
+        log(`Saved ${exceptions.length} exceptions.`);
+    }
+}
+
+
+
+===== FILE: ./preferences/AdvancedSettingsGroup.js =====
+// ./preferences/AdvancedSettingsGroup.js
+import Adw from 'gi://Adw'; 
+import Gtk from 'gi://Gtk'; 
+import Gio from 'gi://Gio'; 
+import GLib from 'gi://GLib';
+import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js'; 
+
+const log = msg => console.log(`[TabbedTilingPrefs.AdvancedSettings] ${msg}`); 
+
+export function createAdvancedSettingsGroup(settings, extensionPath) {
+    const group = new Adw.PreferencesGroup({ 
+        title: _('Advanced Settings'),
+        description: _('Advanced configuration options and information')
+    }); 
+
+    // App Name Exceptions Management
+    const exceptionsRow = new Adw.ActionRow({
+        title: _('App Name Exceptions'),
+        subtitle: _('Applications that show window title instead of app name in tabs')
+    });
+
+    const manageExceptionsButton = new Gtk.Button({
+        label: _('Manage Exceptions'),
+        valign: Gtk.Align.CENTER,
+        css_classes: ['flat']
+    });
+
+    manageExceptionsButton.connect('clicked', () => {
+        _showExceptionsDialog(settings, extensionPath, exceptionsRow.get_root());
+    });
+
+    exceptionsRow.add_suffix(manageExceptionsButton);
+    group.add(exceptionsRow);
+
+    // Extension Information
+    const infoRow = new Adw.ActionRow({
+        title: _('Extension Information'),
+        subtitle: _('View extension details and help information')
+    });
+
+    const infoButton = new Gtk.Button({
+        icon_name: 'help-about-symbolic',
+        valign: Gtk.Align.CENTER,
+        tooltip_text: _('Show extension information'),
+        css_classes: ['flat', 'circular']
+    });
+
+    infoButton.connect('clicked', () => {
+        _showInfoDialog(infoRow.get_root());
+    });
+
+    infoRow.add_suffix(infoButton);
+    group.add(infoRow);
+
+    // Debug Information
+    const debugRow = new Adw.ActionRow({
+        title: _('Debug Information'),
+        subtitle: _('View system and extension debug information')
+    });
+
+    const debugButton = new Gtk.Button({
+        icon_name: 'applications-debugging-symbolic',
+        valign: Gtk.Align.CENTER,
+        tooltip_text: _('Show debug information'),
+        css_classes: ['flat', 'circular']
+    });
+
+    debugButton.connect('clicked', () => {
+        _showDebugDialog(debugRow.get_root());
+    });
+
+    debugRow.add_suffix(debugButton);
+    group.add(debugRow);
+
+    return group;
+}
+
+function _showExceptionsDialog(settings, extensionPath, parentWindow) {
+    const dialog = new Adw.Window({
+        title: _('App Name Exceptions'),
+        default_width: 500,
+        default_height: 400,
+        modal: true,
+        transient_for: parentWindow
+    });
+
+    const headerBar = new Adw.HeaderBar();
+    dialog.set_titlebar(headerBar);
+
+    const page = new Adw.PreferencesPage();
+    dialog.set_content(page);
+
+    const group = new Adw.PreferencesGroup({
+        title: _('Exception List'),
+        description: _('Applications listed here will show their window title instead of app name in tabs')
+    });
+    page.add(group);
+
+    // Load current exceptions
+    const exceptionsFile = Gio.File.new_for_path(GLib.build_filenamev([extensionPath, 'app_name_exceptions.json']));
+    let exceptions = [];
+    
+    try {
+        if (exceptionsFile.query_exists(null)) {
+            const [ok, contents] = exceptionsFile.load_contents(null);
+            if (ok) {
+                const json = new TextDecoder().decode(contents).trim();
+                exceptions = JSON.parse(json);
+            }
+        }
+    } catch (e) {
+        log(`Error loading exceptions: ${e}`);
+    }
+
+    // Add current exceptions to UI
+    exceptions.forEach(appId => {
+        const row = new Adw.ActionRow({
+            title: appId
+        });
+        
+        const removeButton = new Gtk.Button({
+            icon_name: 'edit-delete-symbolic',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['flat', 'circular', 'destructive-action']
+        });
+        
+        removeButton.connect('clicked', () => {
+            group.remove(row);
+            _saveExceptions(group, exceptionsFile);
+        });
+        
+        row.add_suffix(removeButton);
+        group.add(row);
+    });
+
+    // Add new exception section
+    const addGroup = new Adw.PreferencesGroup({
+        title: _('Add New Exception')
+    });
+    page.add(addGroup);
+
+    const addRow = new Adw.ActionRow({
+        title: _('Application ID'),
+        subtitle: _('e.g., org.gnome.TextEditor or firefox.desktop')
+    });
+
+    const entry = new Gtk.Entry({
+        placeholder_text: _('Enter application ID'),
+        hexpand: true
+    });
+
+    const addButton = new Gtk.Button({
+        label: _('Add'),
+        valign: Gtk.Align.CENTER,
+        css_classes: ['suggested-action']
+    });
+
+    addButton.connect('clicked', () => {
+        const appId = entry.get_text().trim();
+        if (appId) {
+            const newRow = new Adw.ActionRow({
+                title: appId
+            });
+            
+            const removeButton = new Gtk.Button({
+                icon_name: 'edit-delete-symbolic',
+                valign: Gtk.Align.CENTER,
+                css_classes: ['flat', 'circular', 'destructive-action']
+            });
+            
+            removeButton.connect('clicked', () => {
+                group.remove(newRow);
+                _saveExceptions(group, exceptionsFile);
+            });
+            
+            newRow.add_suffix(removeButton);
+            group.add(newRow);
+            entry.set_text('');
+            _saveExceptions(group, exceptionsFile);
+        }
+    });
+
+    addRow.add_suffix(entry);
+    addRow.add_suffix(addButton);
+    addGroup.add(addRow);
+
+    dialog.present();
+}
+
+function _saveExceptions(group, exceptionsFile) {
+    const exceptions = [];
+    let child = group.get_first_child();
+    while (child) {
+        if (child instanceof Adw.ActionRow) {
+            exceptions.push(child.title);
+        }
+        child = child.get_next_sibling();
+    }
+
+    try {
+        const json = JSON.stringify(exceptions, null, 2);
+        exceptionsFile.replace_contents(
+            new TextEncoder().encode(json),
+            null,
+            false,
+            Gio.FileCreateFlags.REPLACE_DESTINATION,
+            null
+        );
+        log(`Saved ${exceptions.length} exceptions`);
+    } catch (e) {
+        log(`Error saving exceptions: ${e}`);
+    }
+}
+
+function _showInfoDialog(parentWindow) {
+    const dialog = new Adw.MessageDialog({
+        heading: _("TabbedTiling Extension"),
+        body: _(`Version: 1.0
+Author: TabbedTiling Team
+
+Features:
+• Automatic window tiling into predefined zones
+• Tabbed interface for managing multiple windows per zone
+• Customizable tab appearance and behavior
+• Zone splitting functionality
+• Keyboard shortcuts for window cycling
+• Work area coordinate system for precise zone placement
+
+For support and documentation, visit the extension homepage.`),
+        transient_for: parentWindow,
+        modal: true
+    });
+    dialog.add_response("ok", _("OK"));
+    dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED);
+    dialog.connect("response", (d) => d.destroy());
+    dialog.present();
+}
+
+function _showDebugDialog(parentWindow) {
+    const display = parentWindow.get_display();
+    const monitors = display.get_monitors();
+    const monitorCount = monitors.get_n_items();
+    
+    let monitorInfo = '';
+    for (let i = 0; i < monitorCount; i++) {
+        const monitor = monitors.get_item(i);
+        const geometry = monitor.get_geometry();
+        const workarea = monitor.get_workarea();
+        monitorInfo += `Monitor ${i}:\n`;
+        monitorInfo += `  Geometry: ${geometry.width}x${geometry.height} at (${geometry.x}, ${geometry.y})\n`;
+        monitorInfo += `  Work Area: ${workarea.width}x${workarea.height} at (${workarea.x}, ${workarea.y})\n`;
+        monitorInfo += `  Scale Factor: ${monitor.get_scale_factor()}\n\n`;
+    }
+
+    const dialog = new Adw.MessageDialog({
+        heading: _("Debug Information"),
+        body: _(`System Information:
+${monitorInfo}Shell Version: ${global.session.mode || 'Unknown'}
+Extension Path: Available in console logs
+
+This information can help with troubleshooting zone positioning issues.`),
+        transient_for: parentWindow,
+        modal: true
+    });
+    dialog.add_response("ok", _("OK"));
+    dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED);
+    dialog.connect("response", (d) => d.destroy());
+    dialog.present();
+}
+
+
+
 ===== FILE: ./preferences/TabBarSettingsGroup.js =====
 // ./preferences/TabBarSettingsGroup.js
 import Adw from 'gi://Adw'; 
@@ -898,7 +1744,10 @@ const TAB_MIN_WIDTH_KEY                     = 'tab-min-width';
 const TAB_MAX_WIDTH_KEY                     = 'tab-max-width'; 
 
 export function createTabBarSettingsGroup(settings) {
-    const group = new Adw.PreferencesGroup({ title: _('Tab Bar Adjustments') }); 
+    const group = new Adw.PreferencesGroup({ 
+        title: _('Tab Bar Adjustments'),
+        description: _('Customize the appearance and behavior of tab bars')
+    }); 
 
     // Tab Bar Height
     const heightSpin = Gtk.SpinButton.new_with_range(16, 200, 1); 
@@ -1005,7 +1854,7 @@ import Shell from 'gi://Shell'; // Added for WindowTracker
 
 import { ZoneDetector } from './ZoneDetector.js'; 
 import { TabBar } from './TabBar.js'; 
-const log = (context, msg) => console.log(`[AutoZoner.WindowManager.${context}] ${msg}`); 
+const log = (context, msg) => console.log(`[TabbedTiling.WindowManager.${context}] ${msg}`); 
 const ALL_RESIZING_OPS = Meta.GrabOp.RESIZING_N | Meta.GrabOp.RESIZING_S |
     Meta.GrabOp.RESIZING_E | Meta.GrabOp.RESIZING_W |
     Meta.GrabOp.RESIZING_NW | Meta.GrabOp.RESIZING_NE | 
@@ -1164,9 +2013,9 @@ export class WindowManager {
         const [, , mods] = global.get_pointer(); 
         const isEvasionKeyHeld = evasionKeyMask !== 0 && (mods & evasionKeyMask) !== 0; 
 
-        delete window._autoZonerEvasionBypass; 
+        delete window._tabbedTilingEvasionBypass; 
         if (isEvasionKeyHeld) { 
-            window._autoZonerEvasionBypass = true; 
+            window._tabbedTilingEvasionBypass = true; 
             const keyName = this._settingsManager.getSnapEvasionKeyName(); 
             log('_onGrabOpBegin', `${keyName} key is held for "${window.get_title()}", bypassing highlights and original rect store.`); 
             this._highlightManager?.stopUpdating(); 
@@ -1181,8 +2030,8 @@ export class WindowManager {
 
         if (!window || !window.get_compositor_private() || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
             return; 
-        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) { 
-            window._autoZonerOriginalRect = window.get_frame_rect(); 
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._tabbedTilingOriginalRect) { 
+            window._tabbedTilingOriginalRect = window.get_frame_rect(); 
             log('_onGrabOpBegin', `Stored original rect for "${window.get_title()}" during normal move.`); 
         }
         this._highlightManager?.startUpdating(); 
@@ -1192,8 +2041,8 @@ export class WindowManager {
 
         this._highlightManager?.stopUpdating(); 
 
-        const wasEvasionBypassActiveAtStart = window._autoZonerEvasionBypass; 
-        delete window._autoZonerEvasionBypass; 
+        const wasEvasionBypassActiveAtStart = window._tabbedTilingEvasionBypass; 
+        delete window._tabbedTilingEvasionBypass; 
 
         const evasionKeyMask = this._getEvasionKeyMask(); 
         const [, , modsAtEnd] = global.get_pointer(); 
@@ -1201,10 +2050,10 @@ export class WindowManager {
         if (isEvasionKeyHeldAtEnd || wasEvasionBypassActiveAtStart) { 
             const keyName = this._settingsManager.getSnapEvasionKeyName(); 
             log('_onGrabOpEnd', `${keyName} key is (or was at start) held for "${window.get_title()}", bypassing snap logic. Window remains at current pos.`); 
-            if (window._autoZonerIsZoned) { 
+            if (window._tabbedTilingIsZoned) { 
                 this._unsnapWindow(window, /* keepCurrentPosition = */ true); 
             } else { 
-                delete window._autoZonerOriginalRect; 
+                delete window._tabbedTilingOriginalRect; 
             }
             return; 
         }
@@ -1249,7 +2098,7 @@ export class WindowManager {
             const appId = app ? app.get_id() : 'N/A';
             const wmClass = window.get_wm_class() || 'N/A';
             const wmClassInstance = window.get_wm_class_instance() || 'N/A';
-            console.log(`[DEBUG] Window "${window.get_title()}" - Old zone: ${window._autoZonerZoneId}, New zone: ${zoneDef ? (zoneDef.id || zoneDef.name) : 'none'}`);
+            console.log(`[DEBUG] Window "${window.get_title()}" - Old zone: ${window._tabbedTilingZoneId}, New zone: ${zoneDef ? (zoneDef.id || zoneDef.name) : 'none'}`);
         } else { 
             this._unsnapWindow(window); 
         }
@@ -1319,7 +2168,7 @@ export class WindowManager {
         global.get_window_actors().forEach(actor => { 
             const win = actor.get_meta_window(); 
             // Only process if not already snapped by the logic above
-            if (!win || !win.get_compositor_private() || win._autoZonerIsZoned || win.is_fullscreen() || win.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
+            if (!win || !win.get_compositor_private() || win._tabbedTilingIsZoned || win.is_fullscreen() || win.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
                 return; 
             this._snapWindowByCurrentPosition(win, currentActiveZones);
         });
@@ -1358,7 +2207,7 @@ export class WindowManager {
 
 	_snapWindowToZone(window, zoneDef, isGrabOpContext = false) { 
         const zoneId = zoneDef.id || zoneDef.name || JSON.stringify(zoneDef);
-        const oldZoneId = window._autoZonerZoneId;
+        const oldZoneId = window._tabbedTilingZoneId;
 
         if (oldZoneId && oldZoneId !== zoneId) {
     // Directly access existing tab bar without repositioning it
@@ -1371,8 +2220,8 @@ export class WindowManager {
 
         if (window.get_maximized && window.get_maximized())
             window.unmaximize(Meta.MaximizeFlags.BOTH);
-        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._autoZonerOriginalRect) {
-            window._autoZonerOriginalRect = window.get_frame_rect();
+        if (this._settingsManager.isRestoreOnUntileEnabled() && !window._tabbedTilingOriginalRect) {
+            window._tabbedTilingOriginalRect = window.get_frame_rect();
             log('_snapWindowToZone', `Stored original rect for "${window.get_title()}"`);
         }
 
@@ -1380,8 +2229,8 @@ export class WindowManager {
         if (!this._snappedWindows[zoneId].includes(window))
             this._snappedWindows[zoneId].push(window);
         this._cycleIndexByZone[zoneId] = (this._snappedWindows[zoneId].length - 1);
-        window._autoZonerIsZoned = true;
-        window._autoZonerZoneId = zoneId; // zoneId here is zoneDef.id
+        window._tabbedTilingIsZoned = true;
+        window._tabbedTilingZoneId = zoneId; // zoneId here is zoneDef.id
 
         const monitor = Main.layoutManager.monitors[zoneDef.monitorIndex];
         const barHeight = this._settingsManager.getTabBarHeight(); 
@@ -1426,7 +2275,7 @@ export class WindowManager {
         if (!isGrabOpContext) {
             GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
                 if (window && window.get_compositor_private() && typeof window.get_frame_rect === 'function' &&
-                    window._autoZonerZoneId === zoneId && !window.is_fullscreen() &&
+                    window._tabbedTilingZoneId === zoneId && !window.is_fullscreen() &&
                     window.get_maximized() === Meta.MaximizeFlags.NONE) {
                     const currentRect = window.get_frame_rect();
                     if (currentRect.x !== gappedWindowX || currentRect.y !== gappedWindowY ||
@@ -1448,23 +2297,23 @@ export class WindowManager {
     }
 
     _unsnapWindow(window, keepCurrentPosition = false) { 
-        const oldZoneId = window._autoZonerZoneId; 
+        const oldZoneId = window._tabbedTilingZoneId; 
         // Only proceed if it was actually zoned OR if we're explicitly keeping position (e.g. Ctrl-drag of a non-zoned window needs its OriginalRect cleared)
         if (!oldZoneId && !keepCurrentPosition) { 
             return; 
         }
         log('_unsnapWindow', `Unsnapping "${window.get_title()}" from zone "${oldZoneId || 'N/A'}". keepCurrentPosition=${keepCurrentPosition}`); 
-        if (!keepCurrentPosition && this._settingsManager.isRestoreOnUntileEnabled() && window._autoZonerOriginalRect) { 
-            const o = window._autoZonerOriginalRect; 
+        if (!keepCurrentPosition && this._settingsManager.isRestoreOnUntileEnabled() && window._tabbedTilingOriginalRect) { 
+            const o = window._tabbedTilingOriginalRect; 
             window.move_resize_frame(false, o.x, o.y, o.width, o.height); 
-            delete window._autoZonerOriginalRect;  
+            delete window._tabbedTilingOriginalRect;  
         } else if (keepCurrentPosition) { 
-            delete window._autoZonerOriginalRect; 
+            delete window._tabbedTilingOriginalRect; 
         }
 
         if (oldZoneId) {  
-            delete window._autoZonerIsZoned; 
-            delete window._autoZonerZoneId; 
+            delete window._tabbedTilingIsZoned; 
+            delete window._tabbedTilingZoneId; 
 
             const oldZoneDef = this._activeDisplayZones.find(z => z.id === oldZoneId); // Find from active zones 
             if (oldZoneDef) { 
@@ -1486,11 +2335,11 @@ export class WindowManager {
 
     cycleWindowsInCurrentZone() {
         const focus = global.display.focus_window; 
-        if (!focus || !focus._autoZonerZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
+        if (!focus || !focus._tabbedTilingZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
             log('cycle', 'No valid zoned window focused; aborting.'); 
             return; 
         }
-        const zoneId = focus._autoZonerZoneId; 
+        const zoneId = focus._tabbedTilingZoneId; 
         const list = this._snappedWindows[zoneId] || []; 
         if (list.length < 2) { 
             log('cycle', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`); 
@@ -1506,11 +2355,11 @@ export class WindowManager {
 
     cycleWindowsInCurrentZoneBackward() {
         const focus = global.display.focus_window; 
-        if (!focus || !focus._autoZonerZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
+        if (!focus || !focus._tabbedTilingZoneId || !focus.get_compositor_private()) { // Added get_compositor_private check
             log('cycle-backward', 'No valid zoned window focused; aborting.'); 
             return; 
         }
-        const zoneId = focus._autoZonerZoneId; 
+        const zoneId = focus._tabbedTilingZoneId; 
         const list = this._snappedWindows[zoneId] || []; 
         if (list.length < 2) { 
             log('cycle-backward', `Zone "${zoneId}" has ${list.length} window(s); skipping cycle.`); 
@@ -2386,26 +3235,43 @@ export class TabBar extends St.BoxLayout {
 
     _makeLabelText(win, app) {
         const appNameExceptions = this._settingsMgr.getAppNameExceptions();
-        let appName = app.get_name();
+        const wordCount = this._settingsMgr.getWindowTitleWordCount();
+        let appName = app ? app.get_name() : null;
         let useWindowTitle = false;
 		
         if (app) {
             let appID = app.get_id();
-            if (appID && appNameExceptions.includes(appID.toLowerCase())) {
+            // Check both the original case and lowercase for compatibility
+            if (appID && (appNameExceptions.includes(appID) || appNameExceptions.includes(appID.toLowerCase()))) {
                 useWindowTitle = true;
             }
         } 
         
         if (useWindowTitle) {
             const windowTitle = win.get_title();
-            // Return window title, fallback to appName (if available), then to 'Untitled'
-            return win.get_title().split(" ")[0] || appName || win.get_wm_class() || 'Untitled';
+            if (!windowTitle) {
+                // Fallback if no window title
+                return appName || win.get_wm_class() || 'Untitled';
+            }
+            
+            if (wordCount === 0) {
+                // Show full window title
+                return windowTitle;
+            } else {
+                // Show specified number of words
+                const words = windowTitle.split(' ');
+                if (words.length > wordCount) {
+                    return words.slice(0, wordCount).join(' ');
+                } else {
+                    return windowTitle;
+                }
+            }
         }
 
         // Original logic if not in exceptions or no app/wmClass
-        if (appName) return appName || win.get_title() || 'Untitled'; // [cite: 796]
-        const c = win.get_wm_class(); // [cite: 796]
-        return c ? c.replace(/[-_.]+/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) : win.get_title() || 'Untitled'; // [cite: 797]
+        if (appName) return appName;
+        const c = win.get_wm_class();
+        return c ? c.replace(/[-_.]+/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) : win.get_title() || 'Untitled';
     }
 
 
@@ -2501,6 +3367,7 @@ export class TabBar extends St.BoxLayout {
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+
 const ZONE_SETTINGS_KEY                     = 'zones';
 const ENABLE_ZONING_KEY                     = 'enable-auto-zoning';
 const RESTORE_ON_UNTILE_KEY                 = 'restore-original-size-on-untile';
@@ -2518,20 +3385,24 @@ const TAB_SPACING_KEY                       = 'tab-spacing';
 const TAB_MIN_WIDTH_KEY                     = 'tab-min-width';
 const TAB_MAX_WIDTH_KEY                     = 'tab-max-width';
 const SNAP_EVASION_KEY                      = 'snap-evasion-key';
+const APP_NAME_EXCEPTIONS_KEY               = 'app-name-exceptions';
+const WINDOW_TITLE_WORD_COUNT_KEY           = 'window-title-word-count';
 const DEFAULT_ZONES_FILENAME                = 'default_zones.json';
-const APP_NAME_EXCEPTIONS_FILENAME          = 'app_name_exceptions.json'; // New constant
-const log = (msg) => console.log(`[AutoZoner.SettingsManager] ${msg}`); 
+const APP_NAME_EXCEPTIONS_FILENAME          = 'app_name_exceptions.json'; // Still used for backward compatibility
+
+const log = (msg) => console.log(`[TabbedTiling.SettingsManager] ${msg}`); 
 
 export class SettingsManager {
     constructor(gsettings, extensionPath) {
         this._gsettings       = gsettings;
         this._extensionPath   = extensionPath;
         this._zones           = [];
-        this._appNameExceptions = []; // New property
         this._signalHandlers  = new Map();
+        
         this._loadDefaultZonesFromFileIfNeeded(); 
         this._loadZonesFromGSettings();
-        this._loadAppNameExceptions(); // New method call
+        this._migrateAppNameExceptionsFromFile(); // Migrate from old JSON file if needed
+        
         this._connectSettingChange(ZONE_SETTINGS_KEY, () => this._loadZonesFromGSettings());
         this._connectSettingChange(ENABLE_ZONING_KEY, () => log('Enable auto zoning changed'));
         this._connectSettingChange(RESTORE_ON_UNTILE_KEY, () => log('Restore on untile changed'));
@@ -2541,23 +3412,16 @@ export class SettingsManager {
         this._connectSettingChange(CYCLE_BACKWARD_ACCELERATOR_KEY, () => log('Backward cycle accelerator changed'));
         this._connectSettingChange(TAB_BAR_HEIGHT_KEY, () => log('Tab bar height changed'));
         this._connectSettingChange(TAB_FONT_SIZE_KEY, () => log('Tab font size changed'));
-        
         this._connectSettingChange(ZONE_GAP_SIZE_KEY, () => log('Zone gap size changed'));
-        
         this._connectSettingChange(TAB_ICON_SIZE_KEY, () => log('Tab icon size changed'));
-        
         this._connectSettingChange(TAB_CORNER_RADIUS_KEY, () => log('Tab corner radius changed'));
-        
         this._connectSettingChange(TAB_CLOSE_BUTTON_ICON_SIZE_KEY, () => log('Tab close button icon size changed'));
-        
         this._connectSettingChange(TAB_SPACING_KEY, () => log('Tab spacing changed'));
-        
         this._connectSettingChange(TAB_MIN_WIDTH_KEY, () => log('Tab min width changed'));
-        
         this._connectSettingChange(TAB_MAX_WIDTH_KEY, () => log('Tab max width changed'));
-        
         this._connectSettingChange(SNAP_EVASION_KEY, () => log(`Snap evasion key changed to: ${this.getSnapEvasionKeyName()}`));
-        
+        this._connectSettingChange(APP_NAME_EXCEPTIONS_KEY, () => log('App name exceptions changed'));
+        this._connectSettingChange(WINDOW_TITLE_WORD_COUNT_KEY, () => log('Window title word count changed'));
     }
 
     _loadDefaultZonesFromFileIfNeeded() {
@@ -2577,46 +3441,34 @@ export class SettingsManager {
                         
                         if (current !== json) { 
                             this._gsettings.set_string(ZONE_SETTINGS_KEY, json);
-                            
                             log(`Default zones imported from file.`);
-                            
                         }
                     } else { 
                         log(`Default file does not contain a JSON array.`);
-                        
                     }
                 } else { 
                     log(`Could not read ${DEFAULT_ZONES_FILENAME}.`);
-                    
                 }
             }
         } catch (e) { 
             log(`Error loading default zones: ${e}`);
-            
         }
     }
 
     _loadZonesFromGSettings() {
         try { 
             const str = this._gsettings.get_string(ZONE_SETTINGS_KEY);
-            
             const arr = JSON.parse(str);
-            
             this._zones = Array.isArray(arr) ? arr : [];
-            
             log(`Loaded ${this._zones.length} zones.`);
-            
         } catch (e) { 
             log(`Failed to parse zones JSON: ${e}`);
-            
             this._zones = [];
-            
         }
     }
 
-    // New method to load app name exceptions
-    _loadAppNameExceptions() {
-        log(`Attempting to load app name exceptions from ${APP_NAME_EXCEPTIONS_FILENAME}…`);
+    // Migrate app name exceptions from old JSON file to new GSettings (one-time migration)
+    _migrateAppNameExceptionsFromFile() {
         const file = Gio.File.new_for_path(GLib.build_filenamev([this._extensionPath, APP_NAME_EXCEPTIONS_FILENAME]));
         try {
             if (file.query_exists(null)) {
@@ -2624,23 +3476,22 @@ export class SettingsManager {
                 if (ok) {
                     const json = new TextDecoder().decode(contents).trim();
                     const arr = JSON.parse(json);
-                    // Store names in lowercase for case-insensitive comparison later
-                    this._appNameExceptions = Array.isArray(arr) ? arr.map(name => name.toLowerCase()) : [];
-                    log(`Loaded ${this._appNameExceptions.length} app name exceptions.`);
-                } else {
-                    log(`Could not read ${APP_NAME_EXCEPTIONS_FILENAME}.`);
-                    this._appNameExceptions = [];
+                    if (Array.isArray(arr) && arr.length > 0) {
+                        // Only migrate if GSettings doesn't have any exceptions yet
+                        const currentExceptions = this._gsettings.get_strv(APP_NAME_EXCEPTIONS_KEY);
+                        if (currentExceptions.length === 0 || (currentExceptions.length === 1 && currentExceptions[0] === 'virt-manager.desktop')) {
+                            this._gsettings.set_strv(APP_NAME_EXCEPTIONS_KEY, arr);
+                            log(`Migrated ${arr.length} app name exceptions from JSON file to GSettings.`);
+                            // Optionally remove the old file after successful migration
+                            // file.delete(null);
+                        }
+                    }
                 }
-            } else {
-                log(`${APP_NAME_EXCEPTIONS_FILENAME} not found. No app name exceptions loaded.`);
-                this._appNameExceptions = [];
             }
         } catch (e) {
-            log(`Error loading app name exceptions: ${e}`);
-            this._appNameExceptions = [];
+            log(`Error migrating app name exceptions: ${e}`);
         }
     }
-
 
     _connectSettingChange(key, callback) {
         const id = this._gsettings.connect(`changed::${key}`, callback);
@@ -2653,106 +3504,90 @@ export class SettingsManager {
 
     getGSettingObject() {
         return this._gsettings;
-        
     }
 
     getExtensionPath() { 
         return this._extensionPath;
-        
     }
 
     getZones() {
         return this._zones;
-        
     }
 
-    // New getter for app name exceptions
+    // Get app name exceptions from GSettings
     getAppNameExceptions() {
-        return this._appNameExceptions;
+        return this._gsettings.get_strv(APP_NAME_EXCEPTIONS_KEY);
+    }
+
+    // Get window title word count
+    getWindowTitleWordCount() {
+        return this._gsettings.get_int(WINDOW_TITLE_WORD_COUNT_KEY);
     }
 
     isZoningEnabled() {
         return this._gsettings.get_boolean(ENABLE_ZONING_KEY);
-        
     }
 
     isRestoreOnUntileEnabled() {
         return this._gsettings.get_boolean(RESTORE_ON_UNTILE_KEY);
-        
     }
 
     isTileNewWindowsEnabled() {
         return this._gsettings.get_boolean(TILE_NEW_WINDOWS_KEY);
-        
     }
 
     isHighlightOnHoverEnabled() {
         return this._gsettings.get_boolean(HIGHLIGHT_ON_HOVER_KEY);
-        
     }
 
     get cycleZoneWindowsAccelerator() {
         const arr = this._gsettings.get_strv(CYCLE_ACCELERATOR_KEY);
-        
         return arr.length > 0 ? arr[0] : '';
-        
     }
 
     get cycleZoneWindowsBackwardAccelerator() {
         const arr = this._gsettings.get_strv(CYCLE_BACKWARD_ACCELERATOR_KEY);
-        
         return arr.length > 0 ? arr[0] : '';
-        
     }
 
     getTabBarHeight() {
         return this._gsettings.get_int(TAB_BAR_HEIGHT_KEY);
-        
     }
 
     getTabFontSize() {
         return this._gsettings.get_int(TAB_FONT_SIZE_KEY);
-        
     }
 
     getZoneGapSize() {
         return this._gsettings.get_int(ZONE_GAP_SIZE_KEY);
-        
     }
 
     getTabIconSize() {
         return this._gsettings.get_int(TAB_ICON_SIZE_KEY);
-        
     }
 
     getTabCornerRadius() {
         return this._gsettings.get_int(TAB_CORNER_RADIUS_KEY);
-        
     }
 
     getTabCloseButtonIconSize() {
         return this._gsettings.get_int(TAB_CLOSE_BUTTON_ICON_SIZE_KEY);
-        
     }
 
     getTabSpacing() {
         return this._gsettings.get_int(TAB_SPACING_KEY);
-        
     }
 
     getTabMinWidth() {
         return this._gsettings.get_int(TAB_MIN_WIDTH_KEY);
-        
     }
 
     getTabMaxWidth() {
         return this._gsettings.get_int(TAB_MAX_WIDTH_KEY);
-        
     }
 
     getSnapEvasionKeyName() {
         return this._gsettings.get_string(SNAP_EVASION_KEY);
-        
     }
 
     destroy() {
@@ -2760,11 +3595,9 @@ export class SettingsManager {
             ids.forEach(id => { 
                 try { gobj.disconnect(id); } catch {} 
             });
-            
         }
         this._signalHandlers.clear(); 
         log('Destroyed.');
-        
     }
 }
 
@@ -3075,7 +3908,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js'; // MOVED TO TOP 
 import { gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const ENABLE_ZONING_KEY = 'enable-auto-zoning';
-const log = (msg) => console.log(`[AutoZoner.Indicator] ${msg}`);
+const log = (msg) => console.log(`[TabbedTiling.Indicator] ${msg}`);
 
 export class Indicator {
     constructor(uuid, settingsManager, extensionObject) {
@@ -3091,7 +3924,7 @@ export class Indicator {
     }
 
     _init() {
-        this._indicator = new PanelMenu.Button(0.5, _('Auto Zoner'), false);
+        this._indicator = new PanelMenu.Button(0.5, _('TabbedTiling'), false);
         const icon = new St.Icon({
             icon_name: 'view-grid-symbolic',
             style_class: 'system-status-icon',
@@ -3188,13 +4021,12 @@ import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/
 // Import new preference group modules
 import { createGeneralSettingsGroup } from './preferences/GeneralSettingsGroup.js';
 import { createTabBarSettingsGroup } from './preferences/TabBarSettingsGroup.js';
+import { createTabNamingSettingsGroup } from './preferences/TabNamingSettingsGroup.js';
 import { ZoneDefinitionsGroup } from './preferences/ZoneDefinitionsGroup.js';
 
-const SNAP_EVASION_KEY = 'snap-evasion-key'; 
-const log = msg => console.log(`[AutoZonerPrefs] ${msg}`); 
+const log = msg => console.log(`[TabbedTilingPrefs] ${msg}`); 
 
-
-export default class AutoZonerPrefs extends ExtensionPreferences {
+export default class TabbedTilingPrefs extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         this._settings = this.getSettings(); 
         this._window = window; 
@@ -3202,28 +4034,52 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 
         const display = Gdk.Display.get_default(); 
         const monitorCount = display?.get_monitors().get_n_items() || 1; 
-        
-        const page = new Adw.PreferencesPage(); 
-        window.add(page); 
 
-        // General Settings Group
+        // General Settings Page
+        const generalPage = new Adw.PreferencesPage({
+            title: _('General'),
+            icon_name: 'preferences-system-symbolic'
+        }); 
+        window.add(generalPage); 
+
         const { group: generalGroup, evasionKeySettingChangedId } = createGeneralSettingsGroup(this._settings); 
-        page.add(generalGroup);
+        generalPage.add(generalGroup);
         this._evasionKeySignalId = evasionKeySettingChangedId;
 
+        // Zone Definitions Page
+        const zonesPage = new Adw.PreferencesPage({
+            title: _('Zones'),
+            icon_name: 'applications-graphics-symbolic'
+        }); 
+        window.add(zonesPage);
 
-        // Tab Bar Adjustments Group
-        const tabBarGroup = createTabBarSettingsGroup(this._settings); 
-        page.add(tabBarGroup);
-
-        // Zone Definitions Group
         this._zoneDefinitionsManager = new ZoneDefinitionsGroup(this._settings, monitorCount, window);
-        page.add(this._zoneDefinitionsManager.getWidget());
+        const zoneDefinitionsGroup = this._zoneDefinitionsManager.getWidget();
+        zonesPage.add(zoneDefinitionsGroup);
 
+        // Tab Bar Appearance Page
+        const tabBarPage = new Adw.PreferencesPage({
+            title: _('Tab Appearance'),
+            icon_name: 'view-grid-symbolic'
+        }); 
+        window.add(tabBarPage);
+
+        const tabBarGroup = createTabBarSettingsGroup(this._settings); 
+        tabBarPage.add(tabBarGroup);
+
+        // Tab Naming Page
+        const tabNamingPage = new Adw.PreferencesPage({
+            title: _('Tab Naming'),
+            icon_name: 'format-text-symbolic'
+        }); 
+        window.add(tabNamingPage);
+
+        const tabNamingGroup = createTabNamingSettingsGroup(this._settings);
+        tabNamingPage.add(tabNamingGroup);
 
         // Disconnect the signal when the preferences window is destroyed
         if (window && typeof window.connect === 'function') { 
-            window.connect('close-request', () => { // Or 'destroy' 
+            window.connect('close-request', () => { 
                 if (this._settings && this._evasionKeySignalId > 0) { 
                     try {
                         this._settings.disconnect(this._evasionKeySignalId); 
@@ -3232,6 +4088,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
                         log(`Error disconnecting evasionKeySettingChangedId: ${e}`); 
                     }
                 }
+                return false;
             });
         }
     }
@@ -3247,7 +4104,7 @@ export default class AutoZonerPrefs extends ExtensionPreferences {
 
 
 ===== FILE: ./stylesheet.css =====
-/* stylesheet.css for Auto Zoner Extension */
+/* stylesheet.css for TabbedTiling Extension */
 
 /* Zone Highlighter */
 .zone-highlight {

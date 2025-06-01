@@ -8,7 +8,7 @@ import { ZoneDetector } from './ZoneDetector.js';
 import Clutter from 'gi://Clutter';
 
 const HIGHLIGHT_TIMER_INTERVAL = 30;
-const log = (msg) => console.log(`[AutoZoner.HighlightManager] ${msg}`);
+const log = (msg) => console.log(`[TabbedTilingPrefs.HighlightManager] ${msg}`);
 
 export class HighlightManager {
     constructor(settingsManager) {

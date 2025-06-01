@@ -5,7 +5,7 @@ import GObject from 'gi://GObject';
 import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const APP_NAME_EXCEPTIONS_KEY = 'app-name-exceptions';
-const log = msg => console.log(`[AutoZonerPrefs.AppExceptionsEditor] ${msg}`);
+const log = msg => console.log(`[TabbedTilingPrefs.AppExceptionsEditor] ${msg}`);
 
 export class AppExceptionEditorRow extends Adw.ActionRow {
     static {

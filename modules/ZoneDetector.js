@@ -1,5 +1,5 @@
 import * as Main from 'resource:///org/gnome/shell/ui/main.js'; 
-const log = (prefix, msg) => console.log(`[AutoZoner.ZoneDetector.${prefix}] ${msg}`); 
+const log = (prefix, msg) => console.log(`[TabbedTilingPrefs.ZoneDetector.${prefix}] ${msg}`); 
 
 function isPointInsideRect(point, rect) {
     const check = point.x >= rect.x && point.x <= rect.x + rect.width && 

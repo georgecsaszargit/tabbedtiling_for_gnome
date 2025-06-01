@@ -547,10 +547,10 @@ export class WindowManager {
         global.get_window_actors().forEach(actor => { 
             const w = actor.get_meta_window(); 
             if (w) { 
-                delete w._autoZonerIsZoned; 
-                delete w._autoZonerOriginalRect; 
-                delete w._autoZonerZoneId; 
-                delete w._autoZonerEvasionBypass;  
+                delete w._tabbedTilingIsZoned; 
+                delete w._tabbedTilingOriginalRect; 
+                delete w._tabbedTilingZoneId; 
+                delete w._tabbedTilingEvasionBypass;  
             }
         });
     }

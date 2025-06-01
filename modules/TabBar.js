@@ -69,7 +69,7 @@ export class TabBar extends St.BoxLayout {
         if (!this._splitButtonIcon || !this._settingsMgr || !this._zoneDef) return;
         const extPath = this._settingsMgr.getExtensionPath();
         if (!extPath) {
-            console.error("[AutoZoner.TabBar] Extension path not available for custom icons.");
+            console.error("[TabbedTilingPrefs.TabBar] Extension path not available for custom icons.");
             this._splitButtonIcon.set_icon_name(this._zoneDef.isSplitParent ? 'view-unite-symbolic' : 'view-split-horizontal-symbolic');
             return;
         }
@@ -86,11 +86,11 @@ export class TabBar extends St.BoxLayout {
             if (iconFile.query_exists(null)) {
                 this._splitButtonIcon.set_gicon(new Gio.FileIcon({ file: iconFile }));
             } else {
-                console.warn(`[AutoZoner.TabBar] Custom icon not found: ${iconFileName}. Falling back to symbolic icon.`);
+                console.warn(`[TabbedTilingPrefs.TabBar] Custom icon not found: ${iconFileName}. Falling back to symbolic icon.`);
                 this._splitButtonIcon.set_icon_name(this._zoneDef.isSplitParent ? 'view-unite-symbolic' : 'view-split-horizontal-symbolic');
             }
         } catch (e) {
-            console.error(`[AutoZoner.TabBar] Error loading custom icon ${iconFileName}: ${e}. Falling back.`);
+            console.error(`[TabbedTilingPrefs.TabBar] Error loading custom icon ${iconFileName}: ${e}. Falling back.`);
             this._splitButtonIcon.set_icon_name(this._zoneDef.isSplitParent ? 'view-unite-symbolic' : 'view-split-horizontal-symbolic');
         }
     }
