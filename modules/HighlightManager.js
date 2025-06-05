@@ -109,20 +109,20 @@ export class HighlightManager {
                 }
 
                 if (currentHighlighterOnPointerMonitor) {
-                    const workArea = this._getMonitorGeometry(pointerMonitorIndex);
-                    const absoluteZoneRect = {
-                        x: workArea.x + hoveredZone.x, y: workArea.y + hoveredZone.y,
-                        width: hoveredZone.width, height: hoveredZone.height
-                    };
-                    currentHighlighterOnPointerMonitor.showAt(absoluteZoneRect);
-                    this._currentlyHighlightedInfo = {
-                        monitorIndex: pointerMonitorIndex,
-                        zone: hoveredZone,
-                        highlighter: currentHighlighterOnPointerMonitor
-                    };
-                } else {
-                     this._currentlyHighlightedInfo = null;
-                }
+					const monitor = Main.layoutManager.monitors[pointerMonitorIndex]; // Changed from workArea
+					const absoluteZoneRect = {
+						x: monitor.x + hoveredZone.x, 
+						y: monitor.y + hoveredZone.y,
+						width: hoveredZone.width, 
+						height: hoveredZone.height
+					};
+					currentHighlighterOnPointerMonitor.showAt(absoluteZoneRect);
+					this._currentlyHighlightedInfo = {
+						monitorIndex: pointerMonitorIndex,
+						zone: hoveredZone,
+						highlighter: currentHighlighterOnPointerMonitor
+					};
+				}
             }
         } else {
             if (this._currentlyHighlightedInfo) {

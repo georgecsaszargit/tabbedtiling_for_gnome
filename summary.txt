@@ -14,10 +14,10 @@
     </key>
 
     <key name="zones" type="s">
-      <default>'[]'</default>
-      <summary>Zone Definitions</summary>
-      <description>A JSON string representing an array of zone objects. Coordinates should be relative to the work area (excluding panels and docks).</description>
-    </key>
+	  <default>'[]'</default>
+	  <summary>Zone Definitions</summary>
+	  <description>A JSON string representing an array of zone objects. Coordinates are relative to the full monitor geometry (including panels and docks).</description>
+	</key>
 
     <key name="restore-original-size-on-untile" type="b">
       <default>true</default>
@@ -1019,46 +1019,47 @@ export class ZoneDefinitionsGroup {
     }
 
     _addUsageInstructions() {
-        const instructionsRow = new Adw.ActionRow({
-            title: _('Zone Definition Tips'),
-            subtitle: _('Click to view detailed instructions for defining zones')
-        });
+		const instructionsRow = new Adw.ActionRow({
+		    title: _('Zone Definition Tips'),
+		    subtitle: _('Click to view detailed instructions for defining zones')
+		});
 
-        const helpButton = new Gtk.Button({
-            icon_name: 'help-browser-symbolic',
-            valign: Gtk.Align.CENTER,
-            tooltip_text: _('Show zone definition help'),
-            css_classes: ['flat', 'circular']
-        });
+		const helpButton = new Gtk.Button({
+		    icon_name: 'help-browser-symbolic',
+		    valign: Gtk.Align.CENTER,
+		    tooltip_text: _('Show zone definition help'),
+		    css_classes: ['flat', 'circular']
+		});
 
-        helpButton.connect('clicked', () => {
-            const helpText = "Zone coordinates must be relative to the work area (excluding GNOME panels and docks).\n\n" +
-                "Key Points:\n" +
-                "• X, Y: Position from top-left of work area (not full screen)\n" +
-                "• Width, Height: Zone dimensions in pixels\n" +
-                "• Monitor Index: 0 = primary monitor, 1 = secondary, etc.\n" +
-                "• Use gaps setting for spacing between zones\n\n" +
-                "Example for 1920x1080 screen with 32px top panel:\n" +
-                "• Work area: 1920 x 1048 pixels\n" +
-                "• Left half zone: X=0, Y=0, W=960, H=1048\n" +
-                "• Right half zone: X=960, Y=0, W=960, H=1048\n\n" +
-                "Tip: Test your zones by dragging windows after defining them.";
-            
-            const dialog = new Adw.MessageDialog({
-                heading: _("Zone Definition Guide"),
-                body: helpText,
-                transient_for: this._window.get_root(),
-                modal: true
-            });
-            dialog.add_response("ok", _("Got it"));
-            dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED);
-            dialog.connect("response", (d) => d.destroy());
-            dialog.present();
-        });
+		helpButton.connect('clicked', () => {
+		    const helpText = "Zone coordinates are relative to the full monitor geometry.\n\n" +
+		        "Key Points:\n" +
+		        "• X, Y: Position from top-left of monitor (including panels)\n" +
+		        "• Width, Height: Zone dimensions in pixels\n" +
+		        "• Monitor Index: 0 = primary monitor, 1 = secondary, etc.\n" +
+		        "• Use gaps setting for spacing between zones\n\n" +
+		        "Example for 1920x1080 screen:\n" +
+		        "• Full monitor: 1920 x 1080 pixels\n" +
+		        "• Left half zone: X=0, Y=0, W=960, H=1080\n" +
+		        "• Right half zone: X=960, Y=0, W=960, H=1080\n\n" +
+		        "Note: Zones should account for panels/docks in their positioning.\n" +
+		        "Tip: Test your zones by dragging windows after defining them.";
+		    
+		    const dialog = new Adw.MessageDialog({
+		        heading: _("Zone Definition Guide"),
+		        body: helpText,
+		        transient_for: this._window.get_root(),
+		        modal: true
+		    });
+		    dialog.add_response("ok", _("Got it"));
+		    dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED);
+		    dialog.connect("response", (d) => d.destroy());
+		    dialog.present();
+		});
 
-        instructionsRow.add_suffix(helpButton);
-        this.group.add(instructionsRow);
-    }
+		instructionsRow.add_suffix(helpButton);
+		this.group.add(instructionsRow);
+	}
 
     getWidget() {
         return this.group;
@@ -1187,7 +1188,7 @@ import GObject from 'gi://GObject';
 import { gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const APP_NAME_EXCEPTIONS_KEY = 'app-name-exceptions';
-const log = msg => console.log(`[AutoZonerPrefs.AppExceptionsEditor] ${msg}`);
+const log = msg => console.log(`[TabbedTilingPrefs.AppExceptionsEditor] ${msg}`);
 
 export class AppExceptionEditorRow extends Adw.ActionRow {
     static {
@@ -1702,10 +1703,8 @@ function _showDebugDialog(parentWindow) {
     for (let i = 0; i < monitorCount; i++) {
         const monitor = monitors.get_item(i);
         const geometry = monitor.get_geometry();
-        const workarea = monitor.get_workarea();
         monitorInfo += `Monitor ${i}:\n`;
         monitorInfo += `  Geometry: ${geometry.width}x${geometry.height} at (${geometry.x}, ${geometry.y})\n`;
-        monitorInfo += `  Work Area: ${workarea.width}x${workarea.height} at (${workarea.x}, ${workarea.y})\n`;
         monitorInfo += `  Scale Factor: ${monitor.get_scale_factor()}\n\n`;
     }
 
@@ -1715,7 +1714,7 @@ function _showDebugDialog(parentWindow) {
 ${monitorInfo}Shell Version: ${global.session.mode || 'Unknown'}
 Extension Path: Available in console logs
 
-This information can help with troubleshooting zone positioning issues.`),
+Zone coordinates should be relative to the monitor geometry shown above.`),
         transient_for: parentWindow,
         modal: true
     });
@@ -2105,24 +2104,23 @@ export class WindowManager {
     }
     
     _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
-        let bar = this._tabBars[zoneId]; 
-        if (!bar) { 
-            bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this); // Pass zoneDef and this (WindowManager) 
-            this._tabBars[zoneId] = bar; 
-            Main.uiGroup.add_child(bar); 
-        }
+		let bar = this._tabBars[zoneId]; 
+		if (!bar) { 
+		    bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this); 
+		    this._tabBars[zoneId] = bar; 
+		    Main.uiGroup.add_child(bar); 
+		}
 
-        const monitor = Main.layoutManager.monitors[monitorIndex];
-        // Use monitor.x and monitor.y as the base, not wa.x and wa.y
-        const x = monitor.x + zoneDef.x; // 
-        const y = monitor.y + Math.max(0, zoneDef.y); // 
-        
-        const height = this._settingsManager.getTabBarHeight(); // 
-        bar.set_position(x, y); // 
-        bar.set_size(zoneDef.width, height); // 
-        bar.set_style(`height: ${height}px;`); // 
-        return bar; // 
-    }
+		const monitor = Main.layoutManager.monitors[monitorIndex];
+		const x = monitor.x + zoneDef.x; // Already using monitor geometry
+		const y = monitor.y + Math.max(0, zoneDef.y); // Already using monitor geometry
+		
+		const height = this._settingsManager.getTabBarHeight(); 
+		bar.set_position(x, y); 
+		bar.set_size(zoneDef.width, height); 
+		bar.set_style(`height: ${height}px;`); 
+		return bar; 
+	}
 
     snapAllWindowsToZones(previouslySnappedWindowsByZone = null) { 
         if (!this._settingsManager.isZoningEnabled()) return; 
@@ -2392,10 +2390,10 @@ export class WindowManager {
         global.get_window_actors().forEach(actor => { 
             const w = actor.get_meta_window(); 
             if (w) { 
-                delete w._autoZonerIsZoned; 
-                delete w._autoZonerOriginalRect; 
-                delete w._autoZonerZoneId; 
-                delete w._autoZonerEvasionBypass;  
+                delete w._tabbedTilingIsZoned; 
+                delete w._tabbedTilingOriginalRect; 
+                delete w._tabbedTilingZoneId; 
+                delete w._tabbedTilingEvasionBypass;  
             }
         });
     }
@@ -2793,23 +2791,12 @@ export class TabDragger {
 
 ===== FILE: ./modules/ZoneDetector.js =====
 import * as Main from 'resource:///org/gnome/shell/ui/main.js'; 
-const log = (prefix, msg) => console.log(`[AutoZoner.ZoneDetector.${prefix}] ${msg}`); 
+const log = (prefix, msg) => console.log(`[TabbedTilingPrefs.ZoneDetector.${prefix}] ${msg}`); 
 
 function isPointInsideRect(point, rect) {
     const check = point.x >= rect.x && point.x <= rect.x + rect.width && 
                   point.y >= rect.y && point.y <= rect.y + rect.height; 
-    // log('isPointInsideRect', `Point: ${JSON.stringify(point)}, Rect: ${JSON.stringify(rect)}, Result: ${check}`); 
     return check; 
-}
-
-function getMonitorWorkArea(monitorIndex) {
-    if (monitorIndex < 0 || monitorIndex >= Main.layoutManager.monitors.length) { 
-        const primaryIndex = Main.layoutManager.primaryIndex; 
-        // log('getMonitorWorkArea', `Invalid index ${monitorIndex}, using primary ${primaryIndex}`); 
-        return Main.layoutManager.getWorkAreaForMonitor(primaryIndex); 
-    }
-    // log('getMonitorWorkArea', `Using index ${monitorIndex}`); 
-    return Main.layoutManager.getWorkAreaForMonitor(monitorIndex); 
 }
 
 export class ZoneDetector {
@@ -2817,15 +2804,22 @@ export class ZoneDetector {
         // log('constructor', 'Initialized'); 
     }
 
-    findTargetZone(activeZones, point, monitorIndex) { // Takes activeZones directly 
-        const workArea = getMonitorWorkArea(monitorIndex); 
-        log('findTargetZone', `Searching on monitor ${monitorIndex} (WorkArea: X:${workArea.x} Y:${workArea.y} W:${workArea.width} H:${workArea.height}) for point X:${point.x} Y:${point.y}`); 
+    findTargetZone(activeZones, point, monitorIndex) { 
+        // Get monitor geometry instead of work area
+        const monitor = Main.layoutManager.monitors[monitorIndex];
+        if (!monitor) {
+            log('findTargetZone', `Invalid monitor index ${monitorIndex}`);
+            return null;
+        }
+        
+        log('findTargetZone', `Searching on monitor ${monitorIndex} (Geometry: X:${monitor.x} Y:${monitor.y} W:${monitor.width} H:${monitor.height}) for point X:${point.x} Y:${point.y}`); 
         log('findTargetZone', `Available zones for this search: ${JSON.stringify(activeZones.filter(z => z.monitorIndex === monitorIndex))}`); 
+        
         for (const zone of activeZones) { 
             if (zone.monitorIndex === monitorIndex) { 
                 const absoluteZoneRect = { 
-                    x: workArea.x + zone.x, 
-                    y: workArea.y + zone.y, 
+                    x: monitor.x + zone.x, 
+                    y: monitor.y + zone.y, 
                     width: zone.width, 
                     height: zone.height 
                 };
@@ -2833,8 +2827,6 @@ export class ZoneDetector {
                 if (isPointInsideRect(point, absoluteZoneRect)) { 
                     log('findTargetZone', `Point IS INSIDE zone "${zone.name || 'Unnamed'}"`); 
                     return zone; 
-                } else { 
-                    // log('findTargetZone', `Point is NOT inside zone "${zone.name || 'Unnamed'}"`); 
                 }
             }
         }
@@ -2917,7 +2909,7 @@ export class TabBar extends St.BoxLayout {
         if (!this._splitButtonIcon || !this._settingsMgr || !this._zoneDef) return;
         const extPath = this._settingsMgr.getExtensionPath();
         if (!extPath) {
-            console.error("[AutoZoner.TabBar] Extension path not available for custom icons.");
+            console.error("[TabbedTilingPrefs.TabBar] Extension path not available for custom icons.");
             this._splitButtonIcon.set_icon_name(this._zoneDef.isSplitParent ? 'view-unite-symbolic' : 'view-split-horizontal-symbolic');
             return;
         }
@@ -2934,11 +2926,11 @@ export class TabBar extends St.BoxLayout {
             if (iconFile.query_exists(null)) {
                 this._splitButtonIcon.set_gicon(new Gio.FileIcon({ file: iconFile }));
             } else {
-                console.warn(`[AutoZoner.TabBar] Custom icon not found: ${iconFileName}. Falling back to symbolic icon.`);
+                console.warn(`[TabbedTilingPrefs.TabBar] Custom icon not found: ${iconFileName}. Falling back to symbolic icon.`);
                 this._splitButtonIcon.set_icon_name(this._zoneDef.isSplitParent ? 'view-unite-symbolic' : 'view-split-horizontal-symbolic');
             }
         } catch (e) {
-            console.error(`[AutoZoner.TabBar] Error loading custom icon ${iconFileName}: ${e}. Falling back.`);
+            console.error(`[TabbedTilingPrefs.TabBar] Error loading custom icon ${iconFileName}: ${e}. Falling back.`);
             this._splitButtonIcon.set_icon_name(this._zoneDef.isSplitParent ? 'view-unite-symbolic' : 'view-split-horizontal-symbolic');
         }
     }
@@ -3609,7 +3601,7 @@ import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const log = (msg) => console.log(`[AutoZoner.ZoneHighlighter] ${msg}`);
+const log = (msg) => console.log(`[TabbedTilingPrefs.ZoneHighlighter] ${msg}`);
 
 export class ZoneHighlighter extends St.Bin {
     static {
@@ -3707,7 +3699,7 @@ import { ZoneDetector } from './ZoneDetector.js';
 import Clutter from 'gi://Clutter';
 
 const HIGHLIGHT_TIMER_INTERVAL = 30;
-const log = (msg) => console.log(`[AutoZoner.HighlightManager] ${msg}`);
+const log = (msg) => console.log(`[TabbedTilingPrefs.HighlightManager] ${msg}`);
 
 export class HighlightManager {
     constructor(settingsManager) {
@@ -3808,20 +3800,20 @@ export class HighlightManager {
                 }
 
                 if (currentHighlighterOnPointerMonitor) {
-                    const workArea = this._getMonitorGeometry(pointerMonitorIndex);
-                    const absoluteZoneRect = {
-                        x: workArea.x + hoveredZone.x, y: workArea.y + hoveredZone.y,
-                        width: hoveredZone.width, height: hoveredZone.height
-                    };
-                    currentHighlighterOnPointerMonitor.showAt(absoluteZoneRect);
-                    this._currentlyHighlightedInfo = {
-                        monitorIndex: pointerMonitorIndex,
-                        zone: hoveredZone,
-                        highlighter: currentHighlighterOnPointerMonitor
-                    };
-                } else {
-                     this._currentlyHighlightedInfo = null;
-                }
+					const monitor = Main.layoutManager.monitors[pointerMonitorIndex]; // Changed from workArea
+					const absoluteZoneRect = {
+						x: monitor.x + hoveredZone.x, 
+						y: monitor.y + hoveredZone.y,
+						width: hoveredZone.width, 
+						height: hoveredZone.height
+					};
+					currentHighlighterOnPointerMonitor.showAt(absoluteZoneRect);
+					this._currentlyHighlightedInfo = {
+						monitorIndex: pointerMonitorIndex,
+						zone: hoveredZone,
+						highlighter: currentHighlighterOnPointerMonitor
+					};
+				}
             }
         } else {
             if (this._currentlyHighlightedInfo) {

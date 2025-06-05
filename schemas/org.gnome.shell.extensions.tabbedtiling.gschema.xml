@@ -8,10 +8,10 @@
     </key>
 
     <key name="zones" type="s">
-      <default>'[]'</default>
-      <summary>Zone Definitions</summary>
-      <description>A JSON string representing an array of zone objects. Coordinates should be relative to the work area (excluding panels and docks).</description>
-    </key>
+	  <default>'[]'</default>
+	  <summary>Zone Definitions</summary>
+	  <description>A JSON string representing an array of zone objects. Coordinates are relative to the full monitor geometry (including panels and docks).</description>
+	</key>
 
     <key name="restore-original-size-on-untile" type="b">
       <default>true</default>

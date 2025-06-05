@@ -34,46 +34,47 @@ export class ZoneDefinitionsGroup {
     }
 
     _addUsageInstructions() {
-        const instructionsRow = new Adw.ActionRow({
-            title: _('Zone Definition Tips'),
-            subtitle: _('Click to view detailed instructions for defining zones')
-        });
+		const instructionsRow = new Adw.ActionRow({
+		    title: _('Zone Definition Tips'),
+		    subtitle: _('Click to view detailed instructions for defining zones')
+		});
 
-        const helpButton = new Gtk.Button({
-            icon_name: 'help-browser-symbolic',
-            valign: Gtk.Align.CENTER,
-            tooltip_text: _('Show zone definition help'),
-            css_classes: ['flat', 'circular']
-        });
+		const helpButton = new Gtk.Button({
+		    icon_name: 'help-browser-symbolic',
+		    valign: Gtk.Align.CENTER,
+		    tooltip_text: _('Show zone definition help'),
+		    css_classes: ['flat', 'circular']
+		});
 
-        helpButton.connect('clicked', () => {
-            const helpText = "Zone coordinates must be relative to the work area (excluding GNOME panels and docks).\n\n" +
-                "Key Points:\n" +
-                "• X, Y: Position from top-left of work area (not full screen)\n" +
-                "• Width, Height: Zone dimensions in pixels\n" +
-                "• Monitor Index: 0 = primary monitor, 1 = secondary, etc.\n" +
-                "• Use gaps setting for spacing between zones\n\n" +
-                "Example for 1920x1080 screen with 32px top panel:\n" +
-                "• Work area: 1920 x 1048 pixels\n" +
-                "• Left half zone: X=0, Y=0, W=960, H=1048\n" +
-                "• Right half zone: X=960, Y=0, W=960, H=1048\n\n" +
-                "Tip: Test your zones by dragging windows after defining them.";
-            
-            const dialog = new Adw.MessageDialog({
-                heading: _("Zone Definition Guide"),
-                body: helpText,
-                transient_for: this._window.get_root(),
-                modal: true
-            });
-            dialog.add_response("ok", _("Got it"));
-            dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED);
-            dialog.connect("response", (d) => d.destroy());
-            dialog.present();
-        });
+		helpButton.connect('clicked', () => {
+		    const helpText = "Zone coordinates are relative to the full monitor geometry.\n\n" +
+		        "Key Points:\n" +
+		        "• X, Y: Position from top-left of monitor (including panels)\n" +
+		        "• Width, Height: Zone dimensions in pixels\n" +
+		        "• Monitor Index: 0 = primary monitor, 1 = secondary, etc.\n" +
+		        "• Use gaps setting for spacing between zones\n\n" +
+		        "Example for 1920x1080 screen:\n" +
+		        "• Full monitor: 1920 x 1080 pixels\n" +
+		        "• Left half zone: X=0, Y=0, W=960, H=1080\n" +
+		        "• Right half zone: X=960, Y=0, W=960, H=1080\n\n" +
+		        "Note: Zones should account for panels/docks in their positioning.\n" +
+		        "Tip: Test your zones by dragging windows after defining them.";
+		    
+		    const dialog = new Adw.MessageDialog({
+		        heading: _("Zone Definition Guide"),
+		        body: helpText,
+		        transient_for: this._window.get_root(),
+		        modal: true
+		    });
+		    dialog.add_response("ok", _("Got it"));
+		    dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED);
+		    dialog.connect("response", (d) => d.destroy());
+		    dialog.present();
+		});
 
-        instructionsRow.add_suffix(helpButton);
-        this.group.add(instructionsRow);
-    }
+		instructionsRow.add_suffix(helpButton);
+		this.group.add(instructionsRow);
+	}
 
     getWidget() {
         return this.group;

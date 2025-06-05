@@ -260,24 +260,23 @@ export class WindowManager {
     }
     
     _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
-        let bar = this._tabBars[zoneId]; 
-        if (!bar) { 
-            bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this); // Pass zoneDef and this (WindowManager) 
-            this._tabBars[zoneId] = bar; 
-            Main.uiGroup.add_child(bar); 
-        }
+		let bar = this._tabBars[zoneId]; 
+		if (!bar) { 
+		    bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this); 
+		    this._tabBars[zoneId] = bar; 
+		    Main.uiGroup.add_child(bar); 
+		}
 
-        const monitor = Main.layoutManager.monitors[monitorIndex];
-        // Use monitor.x and monitor.y as the base, not wa.x and wa.y
-        const x = monitor.x + zoneDef.x; // 
-        const y = monitor.y + Math.max(0, zoneDef.y); // 
-        
-        const height = this._settingsManager.getTabBarHeight(); // 
-        bar.set_position(x, y); // 
-        bar.set_size(zoneDef.width, height); // 
-        bar.set_style(`height: ${height}px;`); // 
-        return bar; // 
-    }
+		const monitor = Main.layoutManager.monitors[monitorIndex];
+		const x = monitor.x + zoneDef.x; // Already using monitor geometry
+		const y = monitor.y + Math.max(0, zoneDef.y); // Already using monitor geometry
+		
+		const height = this._settingsManager.getTabBarHeight(); 
+		bar.set_position(x, y); 
+		bar.set_size(zoneDef.width, height); 
+		bar.set_style(`height: ${height}px;`); 
+		return bar; 
+	}
 
     snapAllWindowsToZones(previouslySnappedWindowsByZone = null) { 
         if (!this._settingsManager.isZoningEnabled()) return; 

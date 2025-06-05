@@ -245,10 +245,8 @@ function _showDebugDialog(parentWindow) {
     for (let i = 0; i < monitorCount; i++) {
         const monitor = monitors.get_item(i);
         const geometry = monitor.get_geometry();
-        const workarea = monitor.get_workarea();
         monitorInfo += `Monitor ${i}:\n`;
         monitorInfo += `  Geometry: ${geometry.width}x${geometry.height} at (${geometry.x}, ${geometry.y})\n`;
-        monitorInfo += `  Work Area: ${workarea.width}x${workarea.height} at (${workarea.x}, ${workarea.y})\n`;
         monitorInfo += `  Scale Factor: ${monitor.get_scale_factor()}\n\n`;
     }
 
@@ -258,7 +256,7 @@ function _showDebugDialog(parentWindow) {
 ${monitorInfo}Shell Version: ${global.session.mode || 'Unknown'}
 Extension Path: Available in console logs
 
-This information can help with troubleshooting zone positioning issues.`),
+Zone coordinates should be relative to the monitor geometry shown above.`),
         transient_for: parentWindow,
         modal: true
     });
