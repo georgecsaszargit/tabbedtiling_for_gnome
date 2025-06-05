@@ -15,7 +15,7 @@ export class ZoneDefinitionsGroup {
 
         this.group = new Adw.PreferencesGroup({ 
             title: _('Zone Definitions'), 
-            description: _('Define screen areas where windows will tile automatically. Use work area coordinates (excluding panels and docks).') 
+			description: _('Define screen areas where windows will tile automatically. Use full monitor coordinates (including panels and docks).')
         });
 
         // Add usage instructions
@@ -48,17 +48,11 @@ export class ZoneDefinitionsGroup {
 
 		helpButton.connect('clicked', () => {
 		    const helpText = "Zone coordinates are relative to the full monitor geometry.\n\n" +
-		        "Key Points:\n" +
-		        "• X, Y: Position from top-left of monitor (including panels)\n" +
-		        "• Width, Height: Zone dimensions in pixels\n" +
-		        "• Monitor Index: 0 = primary monitor, 1 = secondary, etc.\n" +
-		        "• Use gaps setting for spacing between zones\n\n" +
-		        "Example for 1920x1080 screen:\n" +
-		        "• Full monitor: 1920 x 1080 pixels\n" +
-		        "• Left half zone: X=0, Y=0, W=960, H=1080\n" +
-		        "• Right half zone: X=960, Y=0, W=960, H=1080\n\n" +
-		        "Note: Zones should account for panels/docks in their positioning.\n" +
-		        "Tip: Test your zones by dragging windows after defining them.";
+							"Key Points:\n" +
+							"• X, Y: Position from top-left of monitor (0,0)\n" +
+							"• You must account for panels/docks in your coordinates\n" +
+							"• Example: If you have a 32px thick top panel, start zones at Y=33\n" +
+							"• Example: If you have a 60px wide dock on the left, start zones at X=61\n";
 		    
 		    const dialog = new Adw.MessageDialog({
 		        heading: _("Zone Definition Guide"),

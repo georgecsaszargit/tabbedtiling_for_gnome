@@ -224,7 +224,7 @@ Features:
 • Customizable tab appearance and behavior
 • Zone splitting functionality
 • Keyboard shortcuts for window cycling
-• Work area coordinate system for precise zone placement
+• Full monitor coordinate system for precise zone placement
 
 For support and documentation, visit the extension homepage.`),
         transient_for: parentWindow,
