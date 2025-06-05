@@ -176,12 +176,17 @@ function _doRefreshExceptionsList(settings, group, addExceptionRow) {
         const next = child.get_next_sibling();
         if (child instanceof Adw.ActionRow) {
             const title = child.title || '';
-            if (title.includes('How Tab Naming Works') || title.includes('Window Title Word Count') || title.includes('Add New Exception')) {
-                // Keep these fixed rows
-            } else {
-                // This is an exception row, remove it
-                group.remove(child);
-            }
+            
+            const isFixedRow = title === _('How Tab Naming Works') ||
+                   title === _('Window Title Word Count') ||
+                   title === _('Add New Exception');
+
+			if (isFixedRow) {
+				// Keep these fixed rows
+			} else {
+				// This is an exception row (assuming its title is just the app ID), remove it
+				group.remove(child);
+			}
         }
         child = next;
     }
@@ -218,17 +223,4 @@ function _doRefreshExceptionsList(settings, group, addExceptionRow) {
         
         log(`Added exception row for: ${appId}`);
     });
-}
-
-function _getChildPosition(parent, child) {
-    let position = 0;
-    let currentChild = parent.get_first_child();
-    while (currentChild) {
-        if (currentChild === child) {
-            return position;
-        }
-        currentChild = currentChild.get_next_sibling();
-        position++;
-    }
-    return -1;
 }
