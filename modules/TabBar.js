@@ -22,7 +22,6 @@ export class TabBar extends St.BoxLayout {
             x_expand: true,
             reactive: true,
         });
-
         this.show_on_add = false;
         this._zoneId = zoneId;
         this._zoneDef = zoneDef;
@@ -50,7 +49,6 @@ export class TabBar extends St.BoxLayout {
     vfunc_allocate(box) {
         super.vfunc_allocate(box);
         if (this._destroyed) return;
-
         if (this._needsLayoutUpdate || (this.visible && this.get_n_children() > 0)) {
             this._updateTabLayout(box);
             this._needsLayoutUpdate = false;
@@ -145,7 +143,8 @@ export class TabBar extends St.BoxLayout {
 
         const tabMinWidth = this._settingsMgr.getTabMinWidth();
         const tabMaxWidth = this._settingsMgr.getTabMaxWidth();
-        const gapSpacing = this._settingsMgr.getTabSpacing(); // Fetches the configured gap size
+        const gapSpacing = this._settingsMgr.getTabSpacing();
+        // Fetches the configured gap size
         const tabCornerRadius = this._settingsMgr.getTabCornerRadius();
         let availableWidth = allocation.get_width() - themeNode.get_horizontal_padding();
         let splitButtonReservation = 0;
@@ -199,7 +198,6 @@ export class TabBar extends St.BoxLayout {
             child.set_style(dynamicStyle);
             // St.BoxLayout will use the margin-left and its own packing logic.
             child.set_y(Math.floor((allocation.get_height() - child.get_height()) / 2));
-
             const tabData = this._tabsData.find(td => td.actor === child);
             if (tabData && tabData.labelActor) {
                 const labelMax = currentChildActualWidth - TAB_INTERNAL_NON_LABEL_WIDTH;
@@ -236,7 +234,8 @@ export class TabBar extends St.BoxLayout {
             }
 
             const compositorPrivate =
-                 win.get_compositor_private?.();
+               
+              win.get_compositor_private?.();
             if (!compositorPrivate) {
                 actor.destroy();
                 return GLib.SOURCE_REMOVE;
@@ -244,6 +243,7 @@ export class TabBar extends St.BoxLayout {
 
             if (this._splitButton && this._splitButton.get_parent() === this) {
                this.insert_child_below(actor, this._splitButton);
+     
             } else {
                 this.add_child(actor);
             }
@@ -252,10 +252,6 @@ export class TabBar extends St.BoxLayout {
             this._tabsData.push({ window: win, actor, labelActor, unmanageId });
 
             this._tabDragger.initPointerHandlers(actor, win);
-
-            if (!this.visible && this._tabsData.length > 0) {
-                this.visible = true;
-            }
 
             this._needsLayoutUpdate = true;
             this.queue_relayout();
@@ -267,6 +263,7 @@ export class TabBar extends St.BoxLayout {
 
                 actor.show();
                 this.highlightWindow(win);
+     
                 this._onTabClicked(win);
 
                 if (actor.can_focus && actor.get_stage() && actor.get_paint_visibility()) {
@@ -313,11 +310,6 @@ export class TabBar extends St.BoxLayout {
         }
         tabData.actor.destroy();
         this._tabsData.splice(idx, 1);
-        if (this._tabsData.length === 0 && (!this._splitButton || !this._splitButton.visible)) {
-            this.visible = false;
-        } else if (this._tabsData.length === 0 && this._splitButton && this._splitButton.visible) {
-            this.visible = true;
-        }
         this._needsLayoutUpdate = true;
         this.queue_relayout();
     }
@@ -354,7 +346,8 @@ export class TabBar extends St.BoxLayout {
             }));
         }
         const fs = this._settingsMgr.getTabFontSize();
-        const title = this._makeLabelText(win, app); // Uses the modified _makeLabelText
+        const title = this._makeLabelText(win, app);
+        // Uses the modified _makeLabelText
         const labelActor = new St.Label({
             text: title,
             y_align: Clutter.ActorAlign.CENTER
@@ -390,7 +383,6 @@ export class TabBar extends St.BoxLayout {
         const wordCount = this._settingsMgr.getWindowTitleWordCount();
         let appName = app ? app.get_name() : null;
         let useWindowTitle = false;
-		
         if (app) {
             let appID = app.get_id();
             // Check both the original case and lowercase for compatibility
@@ -403,7 +395,8 @@ export class TabBar extends St.BoxLayout {
             const windowTitle = win.get_title();
             if (!windowTitle) {
                 // Fallback if no window title
-                return appName || win.get_wm_class() || 'Untitled';
+                return appName ||
+                win.get_wm_class() || 'Untitled';
             }
             
             if (wordCount === 0) {
@@ -441,6 +434,7 @@ export class TabBar extends St.BoxLayout {
                 const compositorPrivate = window.get_compositor_private?.();
                 if (compositorPrivate) {
                     try { window.disconnect(unmanageId); } catch (e) { /* log error */ }
+          
                 }
             }
             if (actor._pressTimeoutId) {
@@ -463,12 +457,14 @@ export class TabBar extends St.BoxLayout {
             if (!box) return;
 
             let appIconActor = null;
+      
             let closeButtonActor = null;
 
             box.get_children().forEach(child => {
                 if (child instanceof St.Icon && child.style_class === 'zone-tab-app-icon') {
                     appIconActor = child;
                 }
+               
                 else if (child instanceof St.Button && child.style_class === 'zone-tab-close-button') {
                     closeButtonActor = child;
                 }
@@ -476,6 +472,7 @@ export class TabBar extends St.BoxLayout {
 
             if (appIconActor) box.remove_child(appIconActor);
             if (app?.get_icon()) {
+            
                 const newAppIcon = new St.Icon({
                     gicon: app.get_icon(),
                     icon_size: this._settingsMgr.getTabIconSize(),
