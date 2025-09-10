@@ -1519,27 +1519,34 @@ export class WindowManager {
     }
 
     connectSignals() {
-        this._disconnectSignals();
-        if (!this._settingsManager.isZoningEnabled()) {
-            log('connectSignals', 'Zoning disabled.');
-            return;
-        }
-        this._rebuildActiveDisplayZones(); // Initial build of active zones
-        this._connect(global.display, 'grab-op-begin', (d, w, o) => this._onGrabOpBegin(d, w, o));
-        this._connect(global.display, 'grab-op-end', (d, w, o) => this._onGrabOpEnd(d, w, o));
-        this._connect(global.display, 'window-created', (d, w) => this._onWindowCreated(d, w));
+		this._disconnectSignals();
+		if (!this._settingsManager.isZoningEnabled()) {
+		    log('connectSignals', 'Zoning disabled.');
+		    return;
+		}
+		this._rebuildActiveDisplayZones(); // 
+		this._connect(global.display, 'grab-op-begin', (d, w, o) => this._onGrabOpBegin(d, w, o)); // 
+		this._connect(global.display, 'grab-op-end', (d, w, o) => this._onGrabOpEnd(d, w, o)); // 
+		this._connect(global.display, 'window-created', (d, w) => this._onWindowCreated(d, w)); // 
 
-        // Connect to workspace switch signal to catch state changes on inactive workspaces
-        this._connect(global.workspace_manager, 'workspace-switched', () => {
-            log('workspace-switched', 'Workspace switched, re-validating all tab bar visibility.');
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
-                this.updateAllTabBarVisibilities();
-                return GLib.SOURCE_REMOVE;
-            });
-        });
+		// Connect to all existing windows on startup
+		global.get_window_actors().forEach(actor => {
+		    const win = actor.get_meta_window();
+		    if (win && win.get_window_type() === Meta.WindowType.NORMAL) {
+		        this._connectWindowStateSignals(win);
+		    }
+		});
 
-        log('connectSignals', 'Signals connected.');
-    }
+		this._connect(global.workspace_manager, 'workspace-switched', () => { // 
+		    log('workspace-switched', 'Workspace switched, re-validating all tab bar visibility.');
+		    GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
+		        this.updateAllTabBarVisibilities();
+		        return GLib.SOURCE_REMOVE;
+		    });
+		});
+
+		log('connectSignals', 'Signals connected.'); // 
+	}
 
     _connect(gobj, name, cb) {
         const id = gobj.connect(name, cb);
@@ -1554,28 +1561,31 @@ export class WindowManager {
     }
 
     _onWindowCreated(display, window) {
-        if (!this._settingsManager.isZoningEnabled() ||
-            !this._settingsManager.isTileNewWindowsEnabled())
-            return;
-        if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL)
-            return;
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => {
-            if (!window || typeof window.get_frame_rect !== 'function' || !window.get_compositor_private()) return GLib.SOURCE_REMOVE; // Added get_compositor_private check
+		if (window.get_window_type() === Meta.WindowType.NORMAL) { // 
+		    this._connectWindowStateSignals(window);
+		}
 
-            const rect = window.get_frame_rect();
-            const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-            const mon = window.get_monitor();
+		if (!this._settingsManager.isZoningEnabled() || // 
+		    !this._settingsManager.isTileNewWindowsEnabled()) // 
+		    return;
+		if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) // 
+		    return;
+		GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { // 
+		    if (!window || typeof window.get_frame_rect !== 'function' || !window.get_compositor_private()) return GLib.SOURCE_REMOVE;
 
-            // Use active display zones
-            const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon);
-            if (zoneDef) {
-                this._snapWindowToZone(window, zoneDef, false);
-                log('_onWindowCreated', `Auto-snapped "${window.get_title()}" into "${zoneDef.name || JSON.stringify(zoneDef)}"`);
-            }
+		    const rect = window.get_frame_rect();
+		    const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; // 
+		    const mon = window.get_monitor(); // 
 
-            return GLib.SOURCE_REMOVE;
-        });
-    }
+		    const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon); // 
+		    if (zoneDef) {
+		        this._snapWindowToZone(window, zoneDef, false); // 
+		        log('_onWindowCreated', `Auto-snapped "<span class="math-inline">\{window\.get\_title\(\)\}" into "</span>{zoneDef.name || JSON.stringify(zoneDef)}"`);
+		    }
+
+		    return GLib.SOURCE_REMOVE;
+		});
+	}
 
     _onGrabOpBegin(display, window, op) {
         const isMouseMoving = (op & Meta.GrabOp.MOVING) !== 0;
@@ -1875,44 +1885,44 @@ export class WindowManager {
 	}
 
     _unsnapWindow(window, keepCurrentPosition = false) {
-        const oldZoneId = window._tabbedTilingZoneId;
-        // Only proceed if it was actually zoned OR if we're explicitly keeping position (e.g. Ctrl-drag of a non-zoned window needs its OriginalRect cleared)
-        if (!oldZoneId && !keepCurrentPosition) {
-            return;
-        }
-        log('_unsnapWindow', `Unsnapping "${window.get_title()}" from zone "${oldZoneId || 'N/A'}". keepCurrentPosition=${keepCurrentPosition}`);
-        if (!keepCurrentPosition && this._settingsManager.isRestoreOnUntileEnabled() && window._tabbedTilingOriginalRect) {
-            const o = window._tabbedTilingOriginalRect;
-            window.move_resize_frame(false, o.x, o.y, o.width, o.height);
-            delete window._tabbedTilingOriginalRect;
-        } else if (keepCurrentPosition) {
-            delete window._tabbedTilingOriginalRect;
-        }
+		const oldZoneId = window._tabbedTilingZoneId; // 
+		if (!oldZoneId && !keepCurrentPosition) { // 
+		    return;
+		}
+		log('_unsnapWindow', `Unsnapping "<span class="math-inline">\{window\.get\_title\(\)\}" from zone "</span>{oldZoneId || 'N/A'}". keepCurrentPosition=${keepCurrentPosition}`); // 
+		if (!keepCurrentPosition && this._settingsManager.isRestoreOnUntileEnabled() && window._tabbedTilingOriginalRect) { // 
+		    const o = window._tabbedTilingOriginalRect;
+		    window.move_resize_frame(false, o.x, o.y, o.width, o.height); // 
+		    delete window._tabbedTilingOriginalRect; // 
+		} else if (keepCurrentPosition) {
+		    delete window._tabbedTilingOriginalRect; // 
+		}
 
-        if (oldZoneId) {
-            this._disconnectWindowStateSignals(window);
-            delete window._tabbedTilingIsZoned;
-            delete window._tabbedTilingZoneId;
+		if (oldZoneId) {
+		    // The following line is removed:
+		    // this._disconnectWindowStateSignals(window);
 
-            const oldZoneDef = this._activeDisplayZones.find(z => z.id === oldZoneId);
-            // Find from active zones
-            if (oldZoneDef) {
-                const tabBar = this._tabBars[oldZoneId];
-                if (tabBar) {
-                    tabBar.removeWindow(window);
-                }
-            }
-            this._snappedWindows[oldZoneId] = (this._snappedWindows[oldZoneId] || []).filter(w => w !== window);
-            if (this._snappedWindows[oldZoneId] && this._snappedWindows[oldZoneId].length === 0) {
-                if (this._tabBars[oldZoneId]) {
-                    this._tabBars[oldZoneId].destroy();
-                    delete this._tabBars[oldZoneId];
-                }
-                delete this._cycleIndexByZone[oldZoneId];
-            }
-            this.updateAllTabBarVisibilities();
-        }
-    }
+		    delete window._tabbedTilingIsZoned; // 
+		    delete window._tabbedTilingZoneId; // 
+
+		    const oldZoneDef = this._activeDisplayZones.find(z => z.id === oldZoneId); // 
+		    if (oldZoneDef) {
+		        const tabBar = this._tabBars[oldZoneId];
+		        if (tabBar) {
+		            tabBar.removeWindow(window); // 
+		        }
+		    }
+		    this._snappedWindows[oldZoneId] = (this._snappedWindows[oldZoneId] || []).filter(w => w !== window); // 
+		    if (this._snappedWindows[oldZoneId] && this._snappedWindows[oldZoneId].length === 0) { // 
+		        if (this._tabBars[oldZoneId]) {
+		            this._tabBars[oldZoneId].destroy(); // 
+		            delete this._tabBars[oldZoneId]; // 
+		        }
+		        delete this._cycleIndexByZone[oldZoneId]; // 
+		    }
+		    this.updateAllTabBarVisibilities(); // 
+		}
+	}
 
     _onWindowStateChanged() {
         GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 50, () => {
@@ -1922,20 +1932,25 @@ export class WindowManager {
     }
 
     _connectWindowStateSignals(window) {
-        if (!window || this._windowSignalIds.has(window)) {
-            return;
-        }
+		if (!window || this._windowSignalIds.has(window)) { // 
+		    return;
+		}
 
-        const signalIds = [];
-        const handler = () => this._onWindowStateChanged();
+		const handler = () => this._onWindowStateChanged();
 
-        signalIds.push(window.connect('notify::fullscreen', handler));
-        signalIds.push(window.connect('notify::maximized-horizontally', handler));
-        signalIds.push(window.connect('notify::maximized-vertically', handler));
+		const signalIds = [
+		    window.connect('notify::fullscreen', handler), // 
+		    window.connect('notify::maximized-horizontally', handler), // 
+		    window.connect('notify::maximized-vertically', handler), // 
+		    window.connect('unmanaging', () => {
+		        this._disconnectWindowStateSignals(window);
+		        handler();
+		    })
+		];
 
-        this._windowSignalIds.set(window, signalIds);
-        log('_connectWindowStateSignals', `Connected state signals for "${window.get_title()}".`);
-    }
+		this._windowSignalIds.set(window, signalIds); // 
+		log('_connectWindowStateSignals', `Connected state signals for "${window.get_title()}".`); // 
+	}
 
     _disconnectWindowStateSignals(window) {
         if (!window || !this._windowSignalIds.has(window)) {

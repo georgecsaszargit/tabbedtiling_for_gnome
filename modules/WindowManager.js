@@ -501,7 +501,7 @@ export class WindowManager {
 
 		if (oldZoneId) {
 		    // The following line is removed:
-		    // this._disconnectWindowStateSignals(window);
+		    this._disconnectWindowStateSignals(window); // reenabled for testing
 
 		    delete window._tabbedTilingIsZoned; // 
 		    delete window._tabbedTilingZoneId; // 
