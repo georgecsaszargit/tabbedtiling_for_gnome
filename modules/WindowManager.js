@@ -1,6 +1,7 @@
 // modules/WindowManager.js
 
 import Meta from 'gi://Meta';
+// NOTE: global.window_group is used for correct stacking of the tab bar behind windows
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import Mtk from 'gi://Mtk';
@@ -33,6 +34,8 @@ export class WindowManager {
         this._cycleIndexByZone = {};
         this._tabBars = {};
         this._windowSignalIds = new Map(); // win -> [signalId, ...]
+        this._evasionMotionHandlerId = 0;   // live clamp while Ctrl-dragging
+        this._movingWindow = null;          // track the window being moved under evasion
 
         this._splitStates = new Map(); // Tracks { originalHeight, childZoneId, isActive }
         this._activeDisplayZones = [];
@@ -202,6 +205,17 @@ export class WindowManager {
             const keyName = this._settingsManager.getSnapEvasionKeyName();
             log('_onGrabOpBegin', `${keyName} key is held for "${window.get_title()}", bypassing highlights and original rect store.`);
             this._highlightManager?.stopUpdating();
+            // Start live clamping so the window cannot be dragged higher than the tab bar
+            this._movingWindow = window;
+            if (!this._evasionMotionHandlerId) {
+                this._evasionMotionHandlerId = global.stage.connect('captured-event', (_stage, event) => {
+                    if (!this._movingWindow) return Clutter.EVENT_PROPAGATE;
+                    if (event.type() === Clutter.EventType.MOTION) {
+                        this._clampWindowAboveTabBar(this._movingWindow);
+                    }
+                    return Clutter.EVENT_PROPAGATE;
+                });
+            }
             return;
         }
 
@@ -226,12 +240,21 @@ export class WindowManager {
         const wasEvasionBypassActiveAtStart = window._tabbedTilingEvasionBypass;
         delete window._tabbedTilingEvasionBypass;
 
+        // Stop live clamping if it was enabled
+        if (this._evasionMotionHandlerId) {
+            try { global.stage.disconnect(this._evasionMotionHandlerId); } catch {}
+            this._evasionMotionHandlerId = 0;
+        }
+        this._movingWindow = null;
+
         const evasionKeyMask = this._getEvasionKeyMask();
         const [, , modsAtEnd] = global.get_pointer();
         const isEvasionKeyHeldAtEnd = evasionKeyMask !== 0 && (modsAtEnd & evasionKeyMask) !== 0;
         if (isEvasionKeyHeldAtEnd || wasEvasionBypassActiveAtStart) {
             const keyName = this._settingsManager.getSnapEvasionKeyName();
             log('_onGrabOpEnd', `${keyName} key is (or was at start) held for "${window.get_title()}", bypassing snap logic. Window remains at current pos.`);
+            // Final clamp to ensure it never ends up behind the tab bar
+            this._clampWindowAboveTabBar(window);
             if (window._tabbedTilingIsZoned) {
                 this._unsnapWindow(window, /* keepCurrentPosition = */ true);
             } else {
@@ -288,24 +311,94 @@ export class WindowManager {
     }
 
     _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
-		let bar = this._tabBars[zoneId];
-		if (!bar) {
-		    bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
-		    this._tabBars[zoneId] = bar;
-		    Main.uiGroup.add_child(bar);
-		}
+        let bar = this._tabBars[zoneId];
+        if (!bar) {
+            bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
+            this._tabBars[zoneId] = bar;
+            // Attach to the windows container so normal windows render above the tab bar.
+            // This keeps the bar visible when unobstructed, but a floating window will cover it while dragging.
+            global.window_group.add_child(bar);
+            // Ensure the bar stays below normal window actors within window_group.
+            global.window_group.set_child_below_sibling(bar, null);
+        }
 
-		const monitor = Main.layoutManager.monitors[monitorIndex];
-		const x = monitor.x + zoneDef.x;
-		// Already using monitor geometry
-		const y = monitor.y + Math.max(0, zoneDef.y); // Already using monitor geometry
+        const monitor = Main.layoutManager.monitors[monitorIndex];
+        const x = monitor.x + zoneDef.x;
+        const y = monitor.y + Math.max(0, zoneDef.y);
 
-		const height = this._settingsManager.getTabBarHeight();
-		bar.set_position(x, y);
-		bar.set_size(zoneDef.width, height);
-		bar.set_style(`height: ${height}px;`);
-		return bar;
-	}
+        const height = this._settingsManager.getTabBarHeight();
+        bar.set_position(x, y);
+        bar.set_size(zoneDef.width, height);
+        // Keep style minimal; Clutter stacking is authoritative (no CSS z-index here).
+        bar.set_style(`height: ${height}px;`);
+        return bar;
+    }
+
+    /**
+     * Prevents the actively dragged window (under snap evasion) from going above the tab bar
+     * of the zone under the pointer. If the window's top is higher than the bar bottom, clamp it.
+     */
+    _clampWindowAboveTabBar(window) {
+        if (!window || !window.get_compositor_private()) return;
+        // Only clamp when snap evasion is active for this window
+        if (!this._settingsManager || this._getEvasionKeyMask() === 0) return;
+        const [, , mods] = global.get_pointer();
+        const isEvasionKeyHeld = (mods & this._getEvasionKeyMask()) !== 0;
+        if (!isEvasionKeyHeld) return;
+
+        const [pointerX, pointerY] = global.get_pointer();
+        const hitRect = new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 });
+        let mon = global.display.get_monitor_index_for_rect(hitRect);
+        if (mon < 0) mon = window.get_monitor();
+        if (mon < 0 || mon >= Main.layoutManager.monitors.length)
+            mon = Main.layoutManager.primaryIndex;
+
+        // Determine a target zone for clamping.
+        // If the pointer is ABOVE the zone's Y (e.g., very top pixel), the regular hit-test can fail.
+        // Fall back to selecting a zone by X-overlap on this monitor, choosing the one with the nearest Y.
+        let zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, { x: pointerX, y: pointerY }, mon);
+        if (!zoneDef) {
+            const monitor = Main.layoutManager.monitors[mon];
+            // Zones whose X-range (in global coords) contains the pointer X
+            const candidates = this._activeDisplayZones.filter(z => {
+                if ((z.monitorIndex ?? mon) !== mon) return false;
+                const zx1 = monitor.x + z.x;
+                const zx2 = zx1 + z.width;
+                return pointerX >= zx1 && pointerX <= zx2;
+            });
+            if (candidates.length > 0) {
+                // Pick the zone with the smallest vertical distance from the pointer to the zone's top
+                candidates.sort((a, b) => {
+                    const ay = monitor.y + Math.max(0, a.y);
+                    const by = monitor.y + Math.max(0, b.y);
+                    return Math.abs(pointerY - ay) - Math.abs(pointerY - by);
+                });
+                zoneDef = candidates[0];
+            }
+        }
+        if (!zoneDef) return;
+
+        // Clamp only if this zone has an active tab bar
+        const bar = this._tabBars[zoneDef.id];
+        if (!bar) return;
+
+        const monitor = Main.layoutManager.monitors[zoneDef.monitorIndex ?? mon];
+        // Account for configured zone gap so we clamp a bit LOWER than the tab bar baseline.
+        let gapPx = 0;
+        try {
+            gapPx = typeof this._settingsManager.getZoneGapSize === 'function'
+                ? this._settingsManager.getZoneGapSize()
+                : 0;
+        } catch (_) { gapPx = 0; }
+        const clampY = monitor.y
+            + Math.max(0, zoneDef.y)
+            + this._settingsManager.getTabBarHeight()
+            + gapPx;
+        const rect = window.get_frame_rect();
+        if (rect.y < clampY) {
+            window.move_frame(true, rect.x, clampY);
+        }
+    }
 
     snapAllWindowsToZones(previouslySnappedWindowsByZone = null) {
         if (!this._settingsManager.isZoningEnabled()) return;
