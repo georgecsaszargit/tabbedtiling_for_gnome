@@ -2,6 +2,7 @@
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
+import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const DRAG_THRESHOLD = 10;
@@ -13,6 +14,7 @@ export class TabDragger {
         this._onTabClicked = onTabClicked; // To reactivate tab after drop
         this._dragInfo = null;
         this._pressTimeoutId = 0;
+        this._windowTracker = Shell.WindowTracker.get_default();        
     }
 
     initPointerHandlers(actor, win) {
@@ -162,17 +164,45 @@ export class TabDragger {
             return Clutter.EVENT_STOP; 
         }
 
+        // Compute slot target among TAB ACTORS only (ignore split button and non-tab children)
         let visualChildIndex = 0; 
-        for (let i = 0; i < currentChildren.length; i++) { 
-            const child = currentChildren[i]; 
-            if (child === this._dragInfo.slotActor) continue; 
-
-            const childAllocation = child.get_allocation_box(); 
-            const childMidX = childAllocation.x1 + childAllocation.get_width() / 2; 
-            if (pointerXInTabBar > childMidX) { 
-                newSlotIndex = visualChildIndex + 1; 
+        const tabActors = [];
+        for (let i = 0; i < currentChildren.length; i++) {
+            const child = currentChildren[i];
+            if (child === this._dragInfo.slotActor) continue;
+            if (!child || !child._tabWindow) continue; // skip split button and others
+            tabActors.push(child);
+            const childAllocation = child.get_allocation_box();
+            const childMidX = childAllocation.x1 + childAllocation.get_width() / 2;
+            if (pointerXInTabBar > childMidX) {
+                newSlotIndex = visualChildIndex + 1;
             }
-            visualChildIndex++; 
+            visualChildIndex++;
+        }
+
+        // --- Cluster integrity enforcement during drag ---
+        // Derive app keys per tab and clusters (runs of the same key).
+        const draggedWin = this._dragInfo.draggedActor?._tabWindow;
+        const draggedKey = this._appKey(draggedWin);
+        const keys = tabActors.map(a => this._appKey(a._tabWindow));
+        const clusters = this._computeClusters(keys); // [{key,start,end}, ...] on tab indices
+
+        // 1) Prevent dragging a tab out of its own cluster: snap to the right end of its cluster.
+        const sameCluster = clusters.find(c => c.key === draggedKey);
+        if (sameCluster) {
+            const rightOfOwnCluster = sameCluster.end + 1;
+            if (newSlotIndex < sameCluster.start || newSlotIndex > rightOfOwnCluster) {
+                newSlotIndex = rightOfOwnCluster;
+            }
+        }
+
+        // 2) Prevent inserting a different app into the middle of another cluster:
+        // if target index falls strictly inside a cluster of a different key, snap to end of that cluster.
+        const hit = clusters.find(c =>
+            newSlotIndex > c.start && newSlotIndex <= c.end && c.key !== draggedKey
+        );
+        if (hit) {
+            newSlotIndex = hit.end + 1;
         }
 
         if (currentSlotActualIndex !== newSlotIndex) { 
@@ -232,6 +262,8 @@ export class TabDragger {
                 this._onTabClicked(droppedWindow); 
                 if (draggedActor.can_focus) draggedActor.grab_key_focus(); 
             }
+            // Let TabBar/WindowManager re-apply any final cluster normalization
+            try { this._tabBar.notifyTabsReordered?.(); } catch (_) {}            
         }
 
         this._dragInfo = null; 
@@ -296,6 +328,37 @@ export class TabDragger {
         return this._dragInfo ? this._dragInfo.draggedActor : null;
     }
 
+    // ---------- helpers ----------
+    _appKey(win) {
+        if (!win) return 'win:unknown';
+        try {
+            const app = this._windowTracker.get_window_app(win);
+            if (app && typeof app.get_id === 'function') return `app:${app.get_id()}`;
+        } catch (_) {}
+        try {
+            const cls = typeof win.get_wm_class === 'function' ? win.get_wm_class() : null;
+            if (cls) return `wm:${cls}`;
+        } catch (_) {}
+        return 'win:unknown';
+    }
+
+    /**
+     * Compute contiguous clusters (runs) of identical keys.
+     * @param {string[]} keys - per-tab app keys, in visual tab order (excluding slot)
+     * @returns {{key:string,start:number,end:number}[]}
+     */
+    _computeClusters(keys) {
+        const out = [];
+        if (!Array.isArray(keys) || !keys.length) return out;
+        let start = 0;
+        for (let i = 1; i <= keys.length; i++) {
+            if (i === keys.length || keys[i] !== keys[start]) {
+                out.push({ key: keys[start], start, end: i - 1 });
+                start = i;
+            }
+        }
+        return out;
+    }
 
     destroy() {
         this.cancelDrag(true);

@@ -1399,7 +1399,11 @@ export function createTabBarSettingsGroup(settings) {
 ===== FILE: ./modules/WindowManager.js =====
 // modules/WindowManager.js
 
+/* Grouping patch: keep same-app tabs contiguous and insert new tabs to the right of the app's cluster */
+
+
 import Meta from 'gi://Meta';
+// NOTE: global.window_group is used for correct stacking of the tab bar behind windows
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import Mtk from 'gi://Mtk';
@@ -1432,11 +1436,132 @@ export class WindowManager {
         this._cycleIndexByZone = {};
         this._tabBars = {};
         this._windowSignalIds = new Map(); // win -> [signalId, ...]
+        this._evasionMotionHandlerId = 0;   // live clamp while Ctrl-dragging
+        this._movingWindow = null;          // track the window being moved under evasion
 
         this._splitStates = new Map(); // Tracks { originalHeight, childZoneId, isActive }
         this._activeDisplayZones = [];
         // Zones actually used for snapping/display
     }
+
+    /* ---------- Grouping helpers ---------- */
+    _isSnappableWindowType(win) {
+        if (!win) return false;
+        const wt = win.get_window_type();
+        // Allow NORMAL and DIALOG as "snappable" (you said only Ctrl should leave a window floating)
+        return wt === Meta.WindowType.NORMAL || wt === Meta.WindowType.DIALOG;
+    }
+
+    _appKeyForWindow(win) {
+        try {
+            const app = this._windowTracker.get_window_app(win);
+            const appId = app ? app.get_id() : null;
+            if (appId && appId !== 'N/A') return `app:${appId}`;
+        } catch {}
+        // Fallback to WM_CLASS when app id isn't resolvable
+        const cls = (win.get_wm_class && win.get_wm_class()) || '';
+        const inst = (win.get_wm_class_instance && win.get_wm_class_instance()) || '';
+        return `wmc:${cls}|${inst}`;
+    }
+
+    /**
+     * Ensure same-app tabs stay contiguous within a zone.
+     * If there are tabs from the same app, move 'win' to the right end of that app's cluster.
+     * If none, do nothing (append-at-end behavior is handled by default snap).
+     */
+    _placeWindowInGroupedOrder(zoneId, win) {
+        const bar = this._tabBars[zoneId];
+        if (!bar) return;
+        const list = this._snappedWindows[zoneId] || [];
+        // Need at least 2 total to see a visible reorder (existing + the new one)
+        if (list.length <= 1) return;
+        
+        // If the visual tabbar hasn't caught up yet (actor not added), retry shortly.
+        try {
+            const visualCount = (bar.getWindowsOrder?.() || []).length;
+            if (visualCount < list.length) {
+                log(`[tabbedtiling] visuals (${visualCount}) behind model (${list.length}); retry grouping soon`);
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 120, () => {
+                    if (!this._snappedWindows || !this._snappedWindows[zoneId]) return GLib.SOURCE_REMOVE;
+                    this._placeWindowInGroupedOrder(zoneId, win);
+                    return GLib.SOURCE_REMOVE;
+                });
+                return;
+            }
+        } catch {}        
+
+        const targetKey = this._appKeyForWindow(win);
+        log(`[tabbedtiling] grouping request for zone=${zoneId} win="${win.get_title()}" key=${targetKey}`);
+        // Find all indices of same-app windows in current order
+        const sameIdxs = [];
+        for (let i = 0; i < list.length; i++) {
+            const w = list[i];
+            if (!w || w === win) continue;
+            if (this._appKeyForWindow(w) === targetKey) sameIdxs.push(i);
+        }
+        if (sameIdxs.length === 0) {
+            // No same-app cluster in this zone; keep default placement (append at end)
+            log('[tabbedtiling] no same-app cluster present; leaving default order');
+            return;
+        }
+        // Insert to the right of the rightmost same-app index (gradually merges split clusters)
+        const insertAfter = Math.max(...sameIdxs);
+        // Compute current index of 'win' (it may not be in the list yet if TabBar.addWindow defers via idle)
+        const currentIndex = list.indexOf(win);
+        if (currentIndex === -1) {
+            // Retry shortly after the tab finishes adding (extra safety even with tab-added signal)
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 160, () => {
+                if (!this._snappedWindows || !this._snappedWindows[zoneId]) return GLib.SOURCE_REMOVE;
+                log('[tabbedtiling] retry grouping after idle; tab not yet in list');
+                this._placeWindowInGroupedOrder(zoneId, win);
+                return GLib.SOURCE_REMOVE;
+            });
+            return;
+        }
+        let desiredIndex = insertAfter + 1;
+        if (desiredIndex >= list.length) desiredIndex = list.length - 1;
+        if (desiredIndex < 0) desiredIndex = 0;
+        if (currentIndex === desiredIndex) return; // Already correct
+
+        // Reorder the in-memory list first
+        this._debugLogZoneKeys(zoneId, 'before reorder', list);        
+        list.splice(currentIndex, 1);
+        list.splice(desiredIndex, 0, win);
+        this._snappedWindows[zoneId] = list;
+        // Ask TabBar to reorder tab visuals to match (expects an array of windows)
+        try {
+            bar.syncOrder(list);
+            bar.requestLayoutUpdate?.(true);
+            this._debugLogZoneKeys(zoneId, `after reorder -> moved to ${desiredIndex}`, list);
+        } catch (e) {
+            log('_placeWindowInGroupedOrder', `TabBar.syncOrder failed: ${e}`);
+        }
+        // Finally, enforce cluster integrity in case any split remains
+        this._enforceClusterIntegrity(zoneId);        
+    }
+    
+    _debugLogZoneKeys(zoneId, label, list) {
+        try {
+            const keys = list.map(w => this._appKeyForWindow(w));
+            log(`[tabbedtiling] zone=${zoneId} ${label}: [${keys.join(', ')}]`);
+        } catch {}
+    }
+
+    _debugDumpZoneOrder(zoneId, label) {
+        const bar = this._tabBars[zoneId];
+        const list = this._snappedWindows[zoneId] || [];
+        if (!bar) {
+            log(`[tabbedtiling] dump(${label}) zone=${zoneId} (no bar)`);
+            return;
+        }
+        try {
+            const visualKeys = (bar.getWindowsOrder?.() || []).map(w => this._appKeyForWindow(w));
+            const modelKeys  = list.map(w => this._appKeyForWindow(w));
+            log(`[tabbedtiling] dump(${label}) zone=${zoneId}\n  model:  [${modelKeys.join(', ')}]\n  visual: [${visualKeys.join(', ')}]`);
+        } catch (e) {
+            log(`[tabbedtiling] dump(${label}) error: ${e}`);
+        }
+    }    
 
     _getEvasionKeyMask() {
         const keyName = this._settingsManager.getSnapEvasionKeyName();
@@ -1561,14 +1686,14 @@ export class WindowManager {
     }
 
     _onWindowCreated(display, window) {
-		if (window.get_window_type() === Meta.WindowType.NORMAL) { // 
+        if (this._isSnappableWindowType(window)) { //
 		    this._connectWindowStateSignals(window);
 		}
 
-		if (!this._settingsManager.isZoningEnabled() || // 
-		    !this._settingsManager.isTileNewWindowsEnabled()) // 
+        if (!this._settingsManager.isZoningEnabled() || //
+            !this._settingsManager.isTileNewWindowsEnabled()) //
 		    return;
-		if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) // 
+        if (window.is_fullscreen() || !this._isSnappableWindowType(window)) //
 		    return;
 		GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { // 
 		    if (!window || typeof window.get_frame_rect !== 'function' || !window.get_compositor_private()) return GLib.SOURCE_REMOVE;
@@ -1578,8 +1703,11 @@ export class WindowManager {
 		    const mon = window.get_monitor(); // 
 
 		    const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon); // 
-		    if (zoneDef) {
-		        this._snapWindowToZone(window, zoneDef, false); // 
+            if (zoneDef) {
+                this._snapWindowToZone(window, zoneDef, false); //
+                // Grouping: keep same-app windows contiguous
+                const zid = zoneDef.id || zoneDef.name || JSON.stringify(zoneDef);
+                this._placeWindowInGroupedOrder(zid, window);
 		        log('_onWindowCreated', `Auto-snapped "<span class="math-inline">\{window\.get\_title\(\)\}" into "</span>{zoneDef.name || JSON.stringify(zoneDef)}"`);
 		    }
 
@@ -1601,6 +1729,17 @@ export class WindowManager {
             const keyName = this._settingsManager.getSnapEvasionKeyName();
             log('_onGrabOpBegin', `${keyName} key is held for "${window.get_title()}", bypassing highlights and original rect store.`);
             this._highlightManager?.stopUpdating();
+            // Start live clamping so the window cannot be dragged higher than the tab bar
+            this._movingWindow = window;
+            if (!this._evasionMotionHandlerId) {
+                this._evasionMotionHandlerId = global.stage.connect('captured-event', (_stage, event) => {
+                    if (!this._movingWindow) return Clutter.EVENT_PROPAGATE;
+                    if (event.type() === Clutter.EventType.MOTION) {
+                        this._clampWindowAboveTabBar(this._movingWindow);
+                    }
+                    return Clutter.EVENT_PROPAGATE;
+                });
+            }
             return;
         }
 
@@ -1610,7 +1749,7 @@ export class WindowManager {
             return;
         }
 
-        if (!window || !window.get_compositor_private() || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
+        if (!window || !window.get_compositor_private() || window.is_fullscreen() || !this._isSnappableWindowType(window)) // Added get_compositor_private check
             return;
         if (this._settingsManager.isRestoreOnUntileEnabled() && !window._tabbedTilingOriginalRect) {
             window._tabbedTilingOriginalRect = window.get_frame_rect();
@@ -1625,12 +1764,21 @@ export class WindowManager {
         const wasEvasionBypassActiveAtStart = window._tabbedTilingEvasionBypass;
         delete window._tabbedTilingEvasionBypass;
 
+        // Stop live clamping if it was enabled
+        if (this._evasionMotionHandlerId) {
+            try { global.stage.disconnect(this._evasionMotionHandlerId); } catch {}
+            this._evasionMotionHandlerId = 0;
+        }
+        this._movingWindow = null;
+
         const evasionKeyMask = this._getEvasionKeyMask();
         const [, , modsAtEnd] = global.get_pointer();
         const isEvasionKeyHeldAtEnd = evasionKeyMask !== 0 && (modsAtEnd & evasionKeyMask) !== 0;
         if (isEvasionKeyHeldAtEnd || wasEvasionBypassActiveAtStart) {
             const keyName = this._settingsManager.getSnapEvasionKeyName();
             log('_onGrabOpEnd', `${keyName} key is (or was at start) held for "${window.get_title()}", bypassing snap logic. Window remains at current pos.`);
+            // Final clamp to ensure it never ends up behind the tab bar
+            this._clampWindowAboveTabBar(window);
             if (window._tabbedTilingIsZoned) {
                 this._unsnapWindow(window, /* keepCurrentPosition = */ true);
             } else {
@@ -1651,7 +1799,8 @@ export class WindowManager {
 
 
         if (!this._settingsManager.isZoningEnabled()) return;
-        if (!window || !window.get_compositor_private() || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) { // Added get_compositor_private check
+        if (!window || !window.get_compositor_private() || window.is_fullscreen() || !this._isSnappableWindowType(window)) { // Added get_compositor_private check
+ 
             this._unsnapWindow(window);
             return;
         }
@@ -1671,7 +1820,7 @@ export class WindowManager {
         // Use active display zones
         const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon);
         if (zoneDef) {
-			this._snapWindowToZone(window, zoneDef, true);
+            this._snapWindowToZone(window, zoneDef, true);
 
             // MODIFIED LOG LINE STARTS HERE
             const app = this._windowTracker.get_window_app(window);
@@ -1681,30 +1830,165 @@ export class WindowManager {
             const wmClass = window.get_wm_class() || 'N/A';
             const wmClassInstance = window.get_wm_class_instance() || 'N/A';
             console.log(`[DEBUG] Window "${window.get_title()}" - Old zone: ${window._tabbedTilingZoneId}, New zone: ${zoneDef ? (zoneDef.id || zoneDef.name) : 'none'}`);
+            // Grouping: keep same-app windows contiguous on user drop, after snap
+            const zid = zoneDef.id || zoneDef.name || JSON.stringify(zoneDef);
+            this._debugDumpZoneOrder(zid, 'post-snap (pre-grouping)');
+            this._placeWindowInGroupedOrder(zid, window);
+            this._debugDumpZoneOrder(zid, 'post-grouping');
         } else {
             this._unsnapWindow(window);
         }
     }
 
-    _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
-		let bar = this._tabBars[zoneId];
-		if (!bar) {
-		    bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
-		    this._tabBars[zoneId] = bar;
-		    Main.uiGroup.add_child(bar);
-		}
+_getZoneTabBar(zoneId, monitorIndex, zoneDef) {
+         let bar = this._tabBars[zoneId];
+         if (!bar) {
+             bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
+             this._tabBars[zoneId] = bar;
+ 
+             // Attach to the windows container so normal windows render above the tab bar.
+             // This keeps the bar visible when unobstructed, but a floating window will cover it while dragging.
+             global.window_group.add_child(bar);
+             // Ensure the bar stays below normal window actors within window_group.
+             global.window_group.set_child_below_sibling(bar, null);
+ 
+             // Grouping hooks: run after tabs are added/removed/reordered
+             try {
+                 bar.connect('tab-added', (_bar, _win) => {
+                    this._enforceClusterIntegrity(zoneId);
+                     try { _bar.requestLayoutUpdate?.(true); } catch {}
+                 });
+                 bar.connect('tab-removed', (_bar, _win) => {
+                    this._enforceClusterIntegrity(zoneId);
+                     try { _bar.requestLayoutUpdate?.(true); } catch {}
+                 });
+                bar.connect('tab-reordered', (_bar) => {
+                    // User dragged tabs around inside the bar: keep clusters intact.
+                    this._enforceClusterIntegrity(zoneId);
+                    try { _bar.requestLayoutUpdate?.(true); } catch {}
+                });
+             } catch (e) {
+                 log(`[tabbedtiling] Failed to connect TabBar signals in _getZoneTabBar: ${e}`);
+             }
+         }
+                 const monitor = Main.layoutManager.monitors[monitorIndex];
+        const x = monitor.x + zoneDef.x;
+        const y = monitor.y + Math.max(0, zoneDef.y);
 
-		const monitor = Main.layoutManager.monitors[monitorIndex];
-		const x = monitor.x + zoneDef.x;
-		// Already using monitor geometry
-		const y = monitor.y + Math.max(0, zoneDef.y); // Already using monitor geometry
+        const height = this._settingsManager.getTabBarHeight();
+        bar.set_position(x, y);
+        bar.set_size(zoneDef.width, height);
+        // Keep style minimal; Clutter stacking is authoritative (no CSS z-index here).
+        bar.set_style(`height: ${height}px;`);
+        return bar;
+     }
+     
+    /**
+     * Keep same-app windows contiguous within a zone.
+     * - Merges split clusters
+     * - Prevents dragging a same-app tab out of its cluster (snaps it back)
+     * - Prevents inserting a different app into the middle of a cluster
+     * Order of clusters follows first-appearance (stable by app-key);
+     * order inside each cluster follows original order (so newly-added goes to the right).
+     */
+    _enforceClusterIntegrity(zoneId) {
+        const list = this._snappedWindows[zoneId] || [];
+        const bar = this._tabBars[zoneId];
+        if (!bar || list.length <= 1) return;
 
-		const height = this._settingsManager.getTabBarHeight();
-		bar.set_position(x, y);
-		bar.set_size(zoneDef.width, height);
-		bar.set_style(`height: ${height}px;`);
-		return bar;
-	}
+        // Build app-key buckets in first-appearance order
+        const order = [];
+        const buckets = new Map(); // key -> windows[]
+        for (const w of list) {
+            const k = this._appKeyForWindow(w);
+            if (!buckets.has(k)) {
+                buckets.set(k, []);
+                order.push(k);
+            }
+            buckets.get(k).push(w);
+        }
+        const newList = [];
+        for (const k of order) {
+            const arr = buckets.get(k);
+            if (arr && arr.length) newList.push(...arr);
+        }
+        // If unchanged, nothing to do.
+        if (newList.length === list.length && newList.every((w, i) => w === list[i])) return;
+
+        this._snappedWindows[zoneId] = newList;
+        try {
+            bar.syncOrder(newList);
+            log(`[tabbedtiling] enforced clusters in zone=${zoneId}`);
+        } catch (e) {
+            log(`[tabbedtiling] enforceClusterIntegrity syncOrder failed: ${e}`);
+        }
+    }     
+
+    /**
+     * Prevents the actively dragged window (under snap evasion) from going above the tab bar
+     * of the zone under the pointer. If the window's top is higher than the bar bottom, clamp it.
+     */
+    _clampWindowAboveTabBar(window) {
+        if (!window || !window.get_compositor_private()) return;
+        // Only clamp when snap evasion is active for this window
+        if (!this._settingsManager || this._getEvasionKeyMask() === 0) return;
+        const [, , mods] = global.get_pointer();
+        const isEvasionKeyHeld = (mods & this._getEvasionKeyMask()) !== 0;
+        if (!isEvasionKeyHeld) return;
+
+        const [pointerX, pointerY] = global.get_pointer();
+        const hitRect = new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 });
+        let mon = global.display.get_monitor_index_for_rect(hitRect);
+        if (mon < 0) mon = window.get_monitor();
+        if (mon < 0 || mon >= Main.layoutManager.monitors.length)
+            mon = Main.layoutManager.primaryIndex;
+
+        // Determine a target zone for clamping.
+        // If the pointer is ABOVE the zone's Y (e.g., very top pixel), the regular hit-test can fail.
+        // Fall back to selecting a zone by X-overlap on this monitor, choosing the one with the nearest Y.
+        let zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, { x: pointerX, y: pointerY }, mon);
+        if (!zoneDef) {
+            const monitor = Main.layoutManager.monitors[mon];
+            // Zones whose X-range (in global coords) contains the pointer X
+            const candidates = this._activeDisplayZones.filter(z => {
+                if ((z.monitorIndex ?? mon) !== mon) return false;
+                const zx1 = monitor.x + z.x;
+                const zx2 = zx1 + z.width;
+                return pointerX >= zx1 && pointerX <= zx2;
+            });
+            if (candidates.length > 0) {
+                // Pick the zone with the smallest vertical distance from the pointer to the zone's top
+                candidates.sort((a, b) => {
+                    const ay = monitor.y + Math.max(0, a.y);
+                    const by = monitor.y + Math.max(0, b.y);
+                    return Math.abs(pointerY - ay) - Math.abs(pointerY - by);
+                });
+                zoneDef = candidates[0];
+            }
+        }
+        if (!zoneDef) return;
+
+        // Clamp only if this zone has an active tab bar
+        const bar = this._tabBars[zoneDef.id];
+        if (!bar) return;
+
+        const monitor = Main.layoutManager.monitors[zoneDef.monitorIndex ?? mon];
+        // Account for configured zone gap so we clamp a bit LOWER than the tab bar baseline.
+        let gapPx = 0;
+        try {
+            gapPx = typeof this._settingsManager.getZoneGapSize === 'function'
+                ? this._settingsManager.getZoneGapSize()
+                : 0;
+        } catch (_) { gapPx = 0; }
+        const clampY = monitor.y
+            + Math.max(0, zoneDef.y)
+            + this._settingsManager.getTabBarHeight()
+            + gapPx;
+        const rect = window.get_frame_rect();
+        if (rect.y < clampY) {
+            window.move_frame(true, rect.x, clampY);
+        }
+    }
 
     snapAllWindowsToZones(previouslySnappedWindowsByZone = null) {
         if (!this._settingsManager.isZoningEnabled()) return;
@@ -2161,6 +2445,7 @@ export class WindowManager {
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
+import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const DRAG_THRESHOLD = 10;
@@ -2172,6 +2457,7 @@ export class TabDragger {
         this._onTabClicked = onTabClicked; // To reactivate tab after drop
         this._dragInfo = null;
         this._pressTimeoutId = 0;
+        this._windowTracker = Shell.WindowTracker.get_default();        
     }
 
     initPointerHandlers(actor, win) {
@@ -2321,17 +2607,45 @@ export class TabDragger {
             return Clutter.EVENT_STOP; 
         }
 
+        // Compute slot target among TAB ACTORS only (ignore split button and non-tab children)
         let visualChildIndex = 0; 
-        for (let i = 0; i < currentChildren.length; i++) { 
-            const child = currentChildren[i]; 
-            if (child === this._dragInfo.slotActor) continue; 
-
-            const childAllocation = child.get_allocation_box(); 
-            const childMidX = childAllocation.x1 + childAllocation.get_width() / 2; 
-            if (pointerXInTabBar > childMidX) { 
-                newSlotIndex = visualChildIndex + 1; 
+        const tabActors = [];
+        for (let i = 0; i < currentChildren.length; i++) {
+            const child = currentChildren[i];
+            if (child === this._dragInfo.slotActor) continue;
+            if (!child || !child._tabWindow) continue; // skip split button and others
+            tabActors.push(child);
+            const childAllocation = child.get_allocation_box();
+            const childMidX = childAllocation.x1 + childAllocation.get_width() / 2;
+            if (pointerXInTabBar > childMidX) {
+                newSlotIndex = visualChildIndex + 1;
             }
-            visualChildIndex++; 
+            visualChildIndex++;
+        }
+
+        // --- Cluster integrity enforcement during drag ---
+        // Derive app keys per tab and clusters (runs of the same key).
+        const draggedWin = this._dragInfo.draggedActor?._tabWindow;
+        const draggedKey = this._appKey(draggedWin);
+        const keys = tabActors.map(a => this._appKey(a._tabWindow));
+        const clusters = this._computeClusters(keys); // [{key,start,end}, ...] on tab indices
+
+        // 1) Prevent dragging a tab out of its own cluster: snap to the right end of its cluster.
+        const sameCluster = clusters.find(c => c.key === draggedKey);
+        if (sameCluster) {
+            const rightOfOwnCluster = sameCluster.end + 1;
+            if (newSlotIndex < sameCluster.start || newSlotIndex > rightOfOwnCluster) {
+                newSlotIndex = rightOfOwnCluster;
+            }
+        }
+
+        // 2) Prevent inserting a different app into the middle of another cluster:
+        // if target index falls strictly inside a cluster of a different key, snap to end of that cluster.
+        const hit = clusters.find(c =>
+            newSlotIndex > c.start && newSlotIndex <= c.end && c.key !== draggedKey
+        );
+        if (hit) {
+            newSlotIndex = hit.end + 1;
         }
 
         if (currentSlotActualIndex !== newSlotIndex) { 
@@ -2391,6 +2705,8 @@ export class TabDragger {
                 this._onTabClicked(droppedWindow); 
                 if (draggedActor.can_focus) draggedActor.grab_key_focus(); 
             }
+            // Let TabBar/WindowManager re-apply any final cluster normalization
+            try { this._tabBar.notifyTabsReordered?.(); } catch (_) {}            
         }
 
         this._dragInfo = null; 
@@ -2455,6 +2771,37 @@ export class TabDragger {
         return this._dragInfo ? this._dragInfo.draggedActor : null;
     }
 
+    // ---------- helpers ----------
+    _appKey(win) {
+        if (!win) return 'win:unknown';
+        try {
+            const app = this._windowTracker.get_window_app(win);
+            if (app && typeof app.get_id === 'function') return `app:${app.get_id()}`;
+        } catch (_) {}
+        try {
+            const cls = typeof win.get_wm_class === 'function' ? win.get_wm_class() : null;
+            if (cls) return `wm:${cls}`;
+        } catch (_) {}
+        return 'win:unknown';
+    }
+
+    /**
+     * Compute contiguous clusters (runs) of identical keys.
+     * @param {string[]} keys - per-tab app keys, in visual tab order (excluding slot)
+     * @returns {{key:string,start:number,end:number}[]}
+     */
+    _computeClusters(keys) {
+        const out = [];
+        if (!Array.isArray(keys) || !keys.length) return out;
+        let start = 0;
+        for (let i = 1; i <= keys.length; i++) {
+            if (i === keys.length || keys[i] !== keys[start]) {
+                out.push({ key: keys[start], start, end: i - 1 });
+                start = i;
+            }
+        }
+        return out;
+    }
 
     destroy() {
         this.cancelDrag(true);
@@ -2527,7 +2874,14 @@ import {WindowManager} from "./WindowManager.js";
 
 const TAB_INTERNAL_NON_LABEL_WIDTH = 50;
 export class TabBar extends St.BoxLayout {
-    static { GObject.registerClass(this);
+    static {
+        GObject.registerClass({
+            Signals: {
+                'tab-added':     { param_types: [GObject.TYPE_POINTER] }, // Meta.Window*
+                'tab-removed':   { param_types: [GObject.TYPE_POINTER] }, // Meta.Window*
+                'tab-reordered': { },                                      // no params
+            },
+        }, this);
     }
 
     constructor(zoneId, zoneDef, onTabClicked, settingsMgr, windowManager) {
@@ -2544,6 +2898,9 @@ export class TabBar extends St.BoxLayout {
         this._settingsMgr = settingsMgr;
         this._windowManager = windowManager;
         this._tabsData = [];
+        this._tabActorsByWindow = new Map();        
+        // For reordering support:
+        this._tabActorsByWindow = new Map(); // Meta.Window -> St.Button        
         this.visible = false;
         this._windowTracker = Shell.WindowTracker.get_default();
         this._tabDragger = new TabDragger(this, this._onTabClicked);
@@ -2756,6 +3113,9 @@ export class TabBar extends St.BoxLayout {
                 return GLib.SOURCE_REMOVE;
             }
 
+            // Track actor mapping (enables visual reordering)
+            this._tabActorsByWindow.set(win, actor);
+
             if (this._splitButton && this._splitButton.get_parent() === this) {
                this.insert_child_below(actor, this._splitButton);
      
@@ -2784,6 +3144,10 @@ export class TabBar extends St.BoxLayout {
                 if (actor.can_focus && actor.get_stage() && actor.get_paint_visibility()) {
                      actor.grab_key_focus();
                 }
+                // 🔔 Notify WindowManager that a tab has been fully added & visible
+                try { log('[tabbedtiling][tabbar] emitting tab-added'); } catch {}
+
+                try { this.emit('tab-added', win); } catch (_) {}                
                 return GLib.SOURCE_REMOVE;
             });
             return GLib.SOURCE_REMOVE;
@@ -2825,8 +3189,19 @@ export class TabBar extends St.BoxLayout {
         }
         tabData.actor.destroy();
         this._tabsData.splice(idx, 1);
+        this._tabActorsByWindow.delete(win);
+        try { this.emit('tab-removed', win); } catch (_) {}        
         this._needsLayoutUpdate = true;
         this.queue_relayout();
+    }
+
+	/**
+     * Called by TabDragger when a user finishes a drag-reorder on the tab bar.
+     * Emits 'tab-reordered' so WindowManager can re-enforce clusters.
+     */
+    notifyTabsReordered() {
+        try { log('[tabbedtiling][tabbar] emitting tab-reordered'); } catch {}
+        try { this.emit('tab-reordered'); } catch (_) {}
     }
 
     highlightWindow(win) {
@@ -3018,6 +3393,65 @@ export class TabBar extends St.BoxLayout {
         });
 
         this._updateSplitButtonIcon();
+
+        this._needsLayoutUpdate = true;
+        this.queue_relayout();
+    }
+
+    /**
+     * Return current window order (used for debug logs).
+     */
+    getWindowsOrder() {
+        return this._tabsData.map(td => td.window);
+    }
+
+    /**
+     * Synchronize the visual order of tabs to match the given 'windows' array.
+     * Reorders existing tab actors so same-app clusters remain contiguous.
+     * This does not add or remove tabs—only reorders visuals and _tabsData.
+     */
+    syncOrder(windows) {
+        if (this._destroyed) return;
+        if (!Array.isArray(windows) || windows.length === 0) return;
+
+        // Build current mapping: window -> tabData
+        const map = new Map(this._tabsData.map(td => [td.window, td]));
+
+        // Desired order based on provided windows (keep only those we know about)
+        const desired = [];
+        for (const w of windows) {
+            const td = map.get(w);
+            if (td) {
+                desired.push(td);
+                map.delete(w);
+            }
+        }
+        // Append any remaining tabs (unknown to 'windows') in their current order
+        for (const td of this._tabsData) {
+            if (map.has(td.window)) {
+                desired.push(td);
+                map.delete(td.window);
+            }
+        }
+
+        // Always apply the desired order. Even if it looks unchanged,
+        // timing during allocation can leave visuals out-of-sync.
+        try { log('[tabbedtiling][tabbar] syncOrder applying reorder'); } catch {}
+
+        this._tabsData = desired;
+
+        // Reinsert actors in the new order, always before the split button (if present)
+        for (const td of desired) {
+            const actor = td.actor;
+            if (actor.get_parent() === this) {
+                this.remove_child(actor);
+            }
+            if (this._splitButton && this._splitButton.get_parent() === this) {
+                this.insert_child_below(actor, this._splitButton);
+            } else {
+                this.add_child(actor);
+            }
+        }
 
         this._needsLayoutUpdate = true;
         this.queue_relayout();

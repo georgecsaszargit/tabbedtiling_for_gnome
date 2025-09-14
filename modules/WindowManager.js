@@ -45,6 +45,12 @@ export class WindowManager {
         // Zones actually used for snapping/display
     }
 
+    _getTabBarHeight() {
+        // Fall back to schema default (32) if SettingsManager doesn't expose a getter
+        try { return this._settingsManager.getTabBarHeight(); } catch (_) {}
+        return 32;
+    }
+
     /* ---------- Grouping helpers ---------- */
     _isSnappableWindowType(win) {
         if (!win) return false;
@@ -137,6 +143,8 @@ export class WindowManager {
         } catch (e) {
             log('_placeWindowInGroupedOrder', `TabBar.syncOrder failed: ${e}`);
         }
+        // Finally, enforce cluster integrity in case any split remains
+        this._enforceClusterIntegrity(zoneId);        
     }
     
     _debugLogZoneKeys(zoneId, label, list) {
@@ -371,6 +379,7 @@ export class WindowManager {
         this._movingWindow = null;
 
         const evasionKeyMask = this._getEvasionKeyMask();
+        // NOTE: we still do one last clamp below to ensure we never leave a window behind a tab bar edge case.
         const [, , modsAtEnd] = global.get_pointer();
         const isEvasionKeyHeldAtEnd = evasionKeyMask !== 0 && (modsAtEnd & evasionKeyMask) !== 0;
         if (isEvasionKeyHeldAtEnd || wasEvasionBypassActiveAtStart) {
@@ -396,6 +405,12 @@ export class WindowManager {
             return;
         }
 
+        // --- NEW: Inclusive clamp even when dragged to the very top pixel ---
+        // This ensures we always push the window back below the tab bar (or monitor top)
+        // before evaluating snap targets.
+        try {
+            this._clampWindowAboveTabBar(window, /*inclusiveTop*/ true);
+        } catch (_) {}
 
         if (!this._settingsManager.isZoningEnabled()) return;
         if (!window || !window.get_compositor_private() || window.is_fullscreen() || !this._isSnappableWindowType(window)) { // Added get_compositor_private check
@@ -439,35 +454,38 @@ export class WindowManager {
         }
     }
 
-    _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
-        let bar = this._tabBars[zoneId];
-        if (!bar) {
-            bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
-            this._tabBars[zoneId] = bar;
-
-            // Attach to the windows container so normal windows render above the tab bar.
-            // This keeps the bar visible when unobstructed, but a floating window will cover it while dragging.
-            global.window_group.add_child(bar);
-            // Ensure the bar stays below normal window actors within window_group.
-            global.window_group.set_child_below_sibling(bar, null);
-            // 🔗 Ensure grouping runs AFTER the tab actor was added & shown.
-            // (Your TabBar.addWindow emits 'tab-added' once the actor is visible.)
-            try {
-                bar.connect('tab-added', (_bar, win) => {
-                    // Group the just-added window next to its same-app cluster
-                    this._placeWindowInGroupedOrder(zoneId, win);
-                    // Force a relayout of the bar after reordering
+_getZoneTabBar(zoneId, monitorIndex, zoneDef) {
+         let bar = this._tabBars[zoneId];
+         if (!bar) {
+             bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
+             this._tabBars[zoneId] = bar;
+ 
+             // Attach to the windows container so normal windows render above the tab bar.
+             // This keeps the bar visible when unobstructed, but a floating window will cover it while dragging.
+             global.window_group.add_child(bar);
+             // Ensure the bar stays below normal window actors within window_group.
+             global.window_group.set_child_below_sibling(bar, null);
+ 
+             // Grouping hooks: run after tabs are added/removed/reordered
+             try {
+                 bar.connect('tab-added', (_bar, _win) => {
+                    this._enforceClusterIntegrity(zoneId);
+                     try { _bar.requestLayoutUpdate?.(true); } catch {}
+                 });
+                 bar.connect('tab-removed', (_bar, _win) => {
+                    this._enforceClusterIntegrity(zoneId);
+                     try { _bar.requestLayoutUpdate?.(true); } catch {}
+                 });
+                bar.connect('tab-reordered', (_bar) => {
+                    // User dragged tabs around inside the bar: keep clusters intact.
+                    this._enforceClusterIntegrity(zoneId);
                     try { _bar.requestLayoutUpdate?.(true); } catch {}
                 });
-                bar.connect('tab-removed', (_bar, _win) => {
-                    try { _bar.requestLayoutUpdate?.(true); } catch {}
-                });
-            } catch (e) {
-                log(`[tabbedtiling] Failed to connect TabBar signals in _getZoneTabBar: ${e}`);
-            }            
-        }
-
-        const monitor = Main.layoutManager.monitors[monitorIndex];
+             } catch (e) {
+                 log(`[tabbedtiling] Failed to connect TabBar signals in _getZoneTabBar: ${e}`);
+             }
+         }
+                 const monitor = Main.layoutManager.monitors[monitorIndex];
         const x = monitor.x + zoneDef.x;
         const y = monitor.y + Math.max(0, zoneDef.y);
 
@@ -477,19 +495,63 @@ export class WindowManager {
         // Keep style minimal; Clutter stacking is authoritative (no CSS z-index here).
         bar.set_style(`height: ${height}px;`);
         return bar;
-    }
+     }
+     
+    /**
+     * Keep same-app windows contiguous within a zone.
+     * - Merges split clusters
+     * - Prevents dragging a same-app tab out of its cluster (snaps it back)
+     * - Prevents inserting a different app into the middle of a cluster
+     * Order of clusters follows first-appearance (stable by app-key);
+     * order inside each cluster follows original order (so newly-added goes to the right).
+     */
+    _enforceClusterIntegrity(zoneId) {
+        const list = this._snappedWindows[zoneId] || [];
+        const bar = this._tabBars[zoneId];
+        if (!bar || list.length <= 1) return;
+
+        // Build app-key buckets in first-appearance order
+        const order = [];
+        const buckets = new Map(); // key -> windows[]
+        for (const w of list) {
+            const k = this._appKeyForWindow(w);
+            if (!buckets.has(k)) {
+                buckets.set(k, []);
+                order.push(k);
+            }
+            buckets.get(k).push(w);
+        }
+        const newList = [];
+        for (const k of order) {
+            const arr = buckets.get(k);
+            if (arr && arr.length) newList.push(...arr);
+        }
+        // If unchanged, nothing to do.
+        if (newList.length === list.length && newList.every((w, i) => w === list[i])) return;
+
+        this._snappedWindows[zoneId] = newList;
+        try {
+            bar.syncOrder(newList);
+            log(`[tabbedtiling] enforced clusters in zone=${zoneId}`);
+        } catch (e) {
+            log(`[tabbedtiling] enforceClusterIntegrity syncOrder failed: ${e}`);
+        }
+    }     
 
     /**
      * Prevents the actively dragged window (under snap evasion) from going above the tab bar
      * of the zone under the pointer. If the window's top is higher than the bar bottom, clamp it.
      */
-    _clampWindowAboveTabBar(window) {
+    _clampWindowAboveTabBar(window, inclusiveTop = false) {
         if (!window || !window.get_compositor_private()) return;
-        // Only clamp when snap evasion is active for this window
-        if (!this._settingsManager || this._getEvasionKeyMask() === 0) return;
-        const [, , mods] = global.get_pointer();
-        const isEvasionKeyHeld = (mods & this._getEvasionKeyMask()) !== 0;
-        if (!isEvasionKeyHeld) return;
+        // Only clamp during snap evasion, UNLESS we're doing the final inclusive clamp
+        // (inclusiveTop=true) from grab-end, which should always run.
+        if (!inclusiveTop) {
+            if (!this._settingsManager || this._getEvasionKeyMask() === 0) return;
+            const [, , mods] = global.get_pointer();
+            const isEvasionKeyHeld = (mods & this._getEvasionKeyMask()) !== 0;
+            if (!isEvasionKeyHeld) return;
+        }
 
         const [pointerX, pointerY] = global.get_pointer();
         const hitRect = new Mtk.Rectangle({ x: pointerX, y: pointerY, width: 1, height: 1 });
@@ -540,7 +602,9 @@ export class WindowManager {
             + this._settingsManager.getTabBarHeight()
             + gapPx;
         const rect = window.get_frame_rect();
-        if (rect.y < clampY) {
+        // Inclusive compare when requested so the last top pixel also snaps back.
+        const tooHigh = inclusiveTop ? (rect.y <= clampY) : (rect.y < clampY);
+        if (tooHigh) {
             window.move_frame(true, rect.x, clampY);
         }
     }

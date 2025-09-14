@@ -12,12 +12,12 @@ import {WindowManager} from "./WindowManager.js";
 
 const TAB_INTERNAL_NON_LABEL_WIDTH = 50;
 export class TabBar extends St.BoxLayout {
-    // Add GObject signals we can listen to from WindowManager
     static {
         GObject.registerClass({
             Signals: {
-                'tab-added':  { param_types: [GObject.TYPE_POINTER] },  // Meta.Window*
-                'tab-removed':{ param_types: [GObject.TYPE_POINTER] },  // Meta.Window*
+                'tab-added':     { param_types: [GObject.TYPE_POINTER] }, // Meta.Window*
+                'tab-removed':   { param_types: [GObject.TYPE_POINTER] }, // Meta.Window*
+                'tab-reordered': { },                                      // no params
             },
         }, this);
     }
@@ -36,6 +36,7 @@ export class TabBar extends St.BoxLayout {
         this._settingsMgr = settingsMgr;
         this._windowManager = windowManager;
         this._tabsData = [];
+        this._tabActorsByWindow = new Map();        
         // For reordering support:
         this._tabActorsByWindow = new Map(); // Meta.Window -> St.Button        
         this.visible = false;
@@ -330,6 +331,15 @@ export class TabBar extends St.BoxLayout {
         try { this.emit('tab-removed', win); } catch (_) {}        
         this._needsLayoutUpdate = true;
         this.queue_relayout();
+    }
+
+	/**
+     * Called by TabDragger when a user finishes a drag-reorder on the tab bar.
+     * Emits 'tab-reordered' so WindowManager can re-enforce clusters.
+     */
+    notifyTabsReordered() {
+        try { log('[tabbedtiling][tabbar] emitting tab-reordered'); } catch {}
+        try { this.emit('tab-reordered'); } catch (_) {}
     }
 
     highlightWindow(win) {
