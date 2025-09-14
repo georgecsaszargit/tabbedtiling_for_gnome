@@ -12,7 +12,14 @@ import {WindowManager} from "./WindowManager.js";
 
 const TAB_INTERNAL_NON_LABEL_WIDTH = 50;
 export class TabBar extends St.BoxLayout {
-    static { GObject.registerClass(this);
+    // Add GObject signals we can listen to from WindowManager
+    static {
+        GObject.registerClass({
+            Signals: {
+                'tab-added':  { param_types: [GObject.TYPE_POINTER] },  // Meta.Window*
+                'tab-removed':{ param_types: [GObject.TYPE_POINTER] },  // Meta.Window*
+            },
+        }, this);
     }
 
     constructor(zoneId, zoneDef, onTabClicked, settingsMgr, windowManager) {
@@ -29,6 +36,8 @@ export class TabBar extends St.BoxLayout {
         this._settingsMgr = settingsMgr;
         this._windowManager = windowManager;
         this._tabsData = [];
+        // For reordering support:
+        this._tabActorsByWindow = new Map(); // Meta.Window -> St.Button        
         this.visible = false;
         this._windowTracker = Shell.WindowTracker.get_default();
         this._tabDragger = new TabDragger(this, this._onTabClicked);
@@ -241,6 +250,9 @@ export class TabBar extends St.BoxLayout {
                 return GLib.SOURCE_REMOVE;
             }
 
+            // Track actor mapping (enables visual reordering)
+            this._tabActorsByWindow.set(win, actor);
+
             if (this._splitButton && this._splitButton.get_parent() === this) {
                this.insert_child_below(actor, this._splitButton);
      
@@ -269,6 +281,10 @@ export class TabBar extends St.BoxLayout {
                 if (actor.can_focus && actor.get_stage() && actor.get_paint_visibility()) {
                      actor.grab_key_focus();
                 }
+                // 🔔 Notify WindowManager that a tab has been fully added & visible
+                try { log('[tabbedtiling][tabbar] emitting tab-added'); } catch {}
+
+                try { this.emit('tab-added', win); } catch (_) {}                
                 return GLib.SOURCE_REMOVE;
             });
             return GLib.SOURCE_REMOVE;
@@ -310,6 +326,8 @@ export class TabBar extends St.BoxLayout {
         }
         tabData.actor.destroy();
         this._tabsData.splice(idx, 1);
+        this._tabActorsByWindow.delete(win);
+        try { this.emit('tab-removed', win); } catch (_) {}        
         this._needsLayoutUpdate = true;
         this.queue_relayout();
     }
@@ -503,6 +521,65 @@ export class TabBar extends St.BoxLayout {
         });
 
         this._updateSplitButtonIcon();
+
+        this._needsLayoutUpdate = true;
+        this.queue_relayout();
+    }
+
+    /**
+     * Return current window order (used for debug logs).
+     */
+    getWindowsOrder() {
+        return this._tabsData.map(td => td.window);
+    }
+
+    /**
+     * Synchronize the visual order of tabs to match the given 'windows' array.
+     * Reorders existing tab actors so same-app clusters remain contiguous.
+     * This does not add or remove tabs—only reorders visuals and _tabsData.
+     */
+    syncOrder(windows) {
+        if (this._destroyed) return;
+        if (!Array.isArray(windows) || windows.length === 0) return;
+
+        // Build current mapping: window -> tabData
+        const map = new Map(this._tabsData.map(td => [td.window, td]));
+
+        // Desired order based on provided windows (keep only those we know about)
+        const desired = [];
+        for (const w of windows) {
+            const td = map.get(w);
+            if (td) {
+                desired.push(td);
+                map.delete(w);
+            }
+        }
+        // Append any remaining tabs (unknown to 'windows') in their current order
+        for (const td of this._tabsData) {
+            if (map.has(td.window)) {
+                desired.push(td);
+                map.delete(td.window);
+            }
+        }
+
+        // Always apply the desired order. Even if it looks unchanged,
+        // timing during allocation can leave visuals out-of-sync.
+        try { log('[tabbedtiling][tabbar] syncOrder applying reorder'); } catch {}
+
+        this._tabsData = desired;
+
+        // Reinsert actors in the new order, always before the split button (if present)
+        for (const td of desired) {
+            const actor = td.actor;
+            if (actor.get_parent() === this) {
+                this.remove_child(actor);
+            }
+            if (this._splitButton && this._splitButton.get_parent() === this) {
+                this.insert_child_below(actor, this._splitButton);
+            } else {
+                this.add_child(actor);
+            }
+        }
 
         this._needsLayoutUpdate = true;
         this.queue_relayout();

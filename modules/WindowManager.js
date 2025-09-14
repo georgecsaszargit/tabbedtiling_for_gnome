@@ -1,5 +1,8 @@
 // modules/WindowManager.js
 
+/* Grouping patch: keep same-app tabs contiguous and insert new tabs to the right of the app's cluster */
+
+
 import Meta from 'gi://Meta';
 // NOTE: global.window_group is used for correct stacking of the tab bar behind windows
 import GLib from 'gi://GLib';
@@ -41,6 +44,123 @@ export class WindowManager {
         this._activeDisplayZones = [];
         // Zones actually used for snapping/display
     }
+
+    /* ---------- Grouping helpers ---------- */
+    _isSnappableWindowType(win) {
+        if (!win) return false;
+        const wt = win.get_window_type();
+        // Allow NORMAL and DIALOG as "snappable" (you said only Ctrl should leave a window floating)
+        return wt === Meta.WindowType.NORMAL || wt === Meta.WindowType.DIALOG;
+    }
+
+    _appKeyForWindow(win) {
+        try {
+            const app = this._windowTracker.get_window_app(win);
+            const appId = app ? app.get_id() : null;
+            if (appId && appId !== 'N/A') return `app:${appId}`;
+        } catch {}
+        // Fallback to WM_CLASS when app id isn't resolvable
+        const cls = (win.get_wm_class && win.get_wm_class()) || '';
+        const inst = (win.get_wm_class_instance && win.get_wm_class_instance()) || '';
+        return `wmc:${cls}|${inst}`;
+    }
+
+    /**
+     * Ensure same-app tabs stay contiguous within a zone.
+     * If there are tabs from the same app, move 'win' to the right end of that app's cluster.
+     * If none, do nothing (append-at-end behavior is handled by default snap).
+     */
+    _placeWindowInGroupedOrder(zoneId, win) {
+        const bar = this._tabBars[zoneId];
+        if (!bar) return;
+        const list = this._snappedWindows[zoneId] || [];
+        // Need at least 2 total to see a visible reorder (existing + the new one)
+        if (list.length <= 1) return;
+        
+        // If the visual tabbar hasn't caught up yet (actor not added), retry shortly.
+        try {
+            const visualCount = (bar.getWindowsOrder?.() || []).length;
+            if (visualCount < list.length) {
+                log(`[tabbedtiling] visuals (${visualCount}) behind model (${list.length}); retry grouping soon`);
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 120, () => {
+                    if (!this._snappedWindows || !this._snappedWindows[zoneId]) return GLib.SOURCE_REMOVE;
+                    this._placeWindowInGroupedOrder(zoneId, win);
+                    return GLib.SOURCE_REMOVE;
+                });
+                return;
+            }
+        } catch {}        
+
+        const targetKey = this._appKeyForWindow(win);
+        log(`[tabbedtiling] grouping request for zone=${zoneId} win="${win.get_title()}" key=${targetKey}`);
+        // Find all indices of same-app windows in current order
+        const sameIdxs = [];
+        for (let i = 0; i < list.length; i++) {
+            const w = list[i];
+            if (!w || w === win) continue;
+            if (this._appKeyForWindow(w) === targetKey) sameIdxs.push(i);
+        }
+        if (sameIdxs.length === 0) {
+            // No same-app cluster in this zone; keep default placement (append at end)
+            log('[tabbedtiling] no same-app cluster present; leaving default order');
+            return;
+        }
+        // Insert to the right of the rightmost same-app index (gradually merges split clusters)
+        const insertAfter = Math.max(...sameIdxs);
+        // Compute current index of 'win' (it may not be in the list yet if TabBar.addWindow defers via idle)
+        const currentIndex = list.indexOf(win);
+        if (currentIndex === -1) {
+            // Retry shortly after the tab finishes adding (extra safety even with tab-added signal)
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 160, () => {
+                if (!this._snappedWindows || !this._snappedWindows[zoneId]) return GLib.SOURCE_REMOVE;
+                log('[tabbedtiling] retry grouping after idle; tab not yet in list');
+                this._placeWindowInGroupedOrder(zoneId, win);
+                return GLib.SOURCE_REMOVE;
+            });
+            return;
+        }
+        let desiredIndex = insertAfter + 1;
+        if (desiredIndex >= list.length) desiredIndex = list.length - 1;
+        if (desiredIndex < 0) desiredIndex = 0;
+        if (currentIndex === desiredIndex) return; // Already correct
+
+        // Reorder the in-memory list first
+        this._debugLogZoneKeys(zoneId, 'before reorder', list);        
+        list.splice(currentIndex, 1);
+        list.splice(desiredIndex, 0, win);
+        this._snappedWindows[zoneId] = list;
+        // Ask TabBar to reorder tab visuals to match (expects an array of windows)
+        try {
+            bar.syncOrder(list);
+            bar.requestLayoutUpdate?.(true);
+            this._debugLogZoneKeys(zoneId, `after reorder -> moved to ${desiredIndex}`, list);
+        } catch (e) {
+            log('_placeWindowInGroupedOrder', `TabBar.syncOrder failed: ${e}`);
+        }
+    }
+    
+    _debugLogZoneKeys(zoneId, label, list) {
+        try {
+            const keys = list.map(w => this._appKeyForWindow(w));
+            log(`[tabbedtiling] zone=${zoneId} ${label}: [${keys.join(', ')}]`);
+        } catch {}
+    }
+
+    _debugDumpZoneOrder(zoneId, label) {
+        const bar = this._tabBars[zoneId];
+        const list = this._snappedWindows[zoneId] || [];
+        if (!bar) {
+            log(`[tabbedtiling] dump(${label}) zone=${zoneId} (no bar)`);
+            return;
+        }
+        try {
+            const visualKeys = (bar.getWindowsOrder?.() || []).map(w => this._appKeyForWindow(w));
+            const modelKeys  = list.map(w => this._appKeyForWindow(w));
+            log(`[tabbedtiling] dump(${label}) zone=${zoneId}\n  model:  [${modelKeys.join(', ')}]\n  visual: [${visualKeys.join(', ')}]`);
+        } catch (e) {
+            log(`[tabbedtiling] dump(${label}) error: ${e}`);
+        }
+    }    
 
     _getEvasionKeyMask() {
         const keyName = this._settingsManager.getSnapEvasionKeyName();
@@ -165,14 +285,14 @@ export class WindowManager {
     }
 
     _onWindowCreated(display, window) {
-		if (window.get_window_type() === Meta.WindowType.NORMAL) { // 
+        if (this._isSnappableWindowType(window)) { //
 		    this._connectWindowStateSignals(window);
 		}
 
-		if (!this._settingsManager.isZoningEnabled() || // 
-		    !this._settingsManager.isTileNewWindowsEnabled()) // 
+        if (!this._settingsManager.isZoningEnabled() || //
+            !this._settingsManager.isTileNewWindowsEnabled()) //
 		    return;
-		if (window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) // 
+        if (window.is_fullscreen() || !this._isSnappableWindowType(window)) //
 		    return;
 		GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { // 
 		    if (!window || typeof window.get_frame_rect !== 'function' || !window.get_compositor_private()) return GLib.SOURCE_REMOVE;
@@ -182,8 +302,11 @@ export class WindowManager {
 		    const mon = window.get_monitor(); // 
 
 		    const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon); // 
-		    if (zoneDef) {
-		        this._snapWindowToZone(window, zoneDef, false); // 
+            if (zoneDef) {
+                this._snapWindowToZone(window, zoneDef, false); //
+                // Grouping: keep same-app windows contiguous
+                const zid = zoneDef.id || zoneDef.name || JSON.stringify(zoneDef);
+                this._placeWindowInGroupedOrder(zid, window);
 		        log('_onWindowCreated', `Auto-snapped "<span class="math-inline">\{window\.get\_title\(\)\}" into "</span>{zoneDef.name || JSON.stringify(zoneDef)}"`);
 		    }
 
@@ -225,7 +348,7 @@ export class WindowManager {
             return;
         }
 
-        if (!window || !window.get_compositor_private() || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) // Added get_compositor_private check
+        if (!window || !window.get_compositor_private() || window.is_fullscreen() || !this._isSnappableWindowType(window)) // Added get_compositor_private check
             return;
         if (this._settingsManager.isRestoreOnUntileEnabled() && !window._tabbedTilingOriginalRect) {
             window._tabbedTilingOriginalRect = window.get_frame_rect();
@@ -275,7 +398,8 @@ export class WindowManager {
 
 
         if (!this._settingsManager.isZoningEnabled()) return;
-        if (!window || !window.get_compositor_private() || window.is_fullscreen() || window.get_window_type() !== Meta.WindowType.NORMAL) { // Added get_compositor_private check
+        if (!window || !window.get_compositor_private() || window.is_fullscreen() || !this._isSnappableWindowType(window)) { // Added get_compositor_private check
+ 
             this._unsnapWindow(window);
             return;
         }
@@ -295,7 +419,7 @@ export class WindowManager {
         // Use active display zones
         const zoneDef = this._zoneDetector.findTargetZone(this._activeDisplayZones, center, mon);
         if (zoneDef) {
-			this._snapWindowToZone(window, zoneDef, true);
+            this._snapWindowToZone(window, zoneDef, true);
 
             // MODIFIED LOG LINE STARTS HERE
             const app = this._windowTracker.get_window_app(window);
@@ -305,6 +429,11 @@ export class WindowManager {
             const wmClass = window.get_wm_class() || 'N/A';
             const wmClassInstance = window.get_wm_class_instance() || 'N/A';
             console.log(`[DEBUG] Window "${window.get_title()}" - Old zone: ${window._tabbedTilingZoneId}, New zone: ${zoneDef ? (zoneDef.id || zoneDef.name) : 'none'}`);
+            // Grouping: keep same-app windows contiguous on user drop, after snap
+            const zid = zoneDef.id || zoneDef.name || JSON.stringify(zoneDef);
+            this._debugDumpZoneOrder(zid, 'post-snap (pre-grouping)');
+            this._placeWindowInGroupedOrder(zid, window);
+            this._debugDumpZoneOrder(zid, 'post-grouping');
         } else {
             this._unsnapWindow(window);
         }
@@ -315,11 +444,27 @@ export class WindowManager {
         if (!bar) {
             bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
             this._tabBars[zoneId] = bar;
+
             // Attach to the windows container so normal windows render above the tab bar.
             // This keeps the bar visible when unobstructed, but a floating window will cover it while dragging.
             global.window_group.add_child(bar);
             // Ensure the bar stays below normal window actors within window_group.
             global.window_group.set_child_below_sibling(bar, null);
+            // 🔗 Ensure grouping runs AFTER the tab actor was added & shown.
+            // (Your TabBar.addWindow emits 'tab-added' once the actor is visible.)
+            try {
+                bar.connect('tab-added', (_bar, win) => {
+                    // Group the just-added window next to its same-app cluster
+                    this._placeWindowInGroupedOrder(zoneId, win);
+                    // Force a relayout of the bar after reordering
+                    try { _bar.requestLayoutUpdate?.(true); } catch {}
+                });
+                bar.connect('tab-removed', (_bar, _win) => {
+                    try { _bar.requestLayoutUpdate?.(true); } catch {}
+                });
+            } catch (e) {
+                log(`[tabbedtiling] Failed to connect TabBar signals in _getZoneTabBar: ${e}`);
+            }            
         }
 
         const monitor = Main.layoutManager.monitors[monitorIndex];
