@@ -456,9 +456,13 @@ export class WindowManager {
 _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
          let bar = this._tabBars[zoneId];
          if (!bar) {
-            bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
-            this._tabBars[zoneId] = bar;
-            Main.uiGroup.add_child(bar);
+         bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
+    this._tabBars[zoneId] = bar;
+ 
+             // Attach to the windows container so normal windows render above the tab bar.
+    global.window_group.add_child(bar);
+    // Ensure the bar stays below normal window actors within window_group.
+             global.window_group.set_child_below_sibling(bar, null);
             // Grouping hooks: run after tabs are added/removed/reordered
              try {
                  bar.connect('tab-added', (_bar, _win) => {
@@ -795,8 +799,8 @@ _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
 		}
 
 		if (oldZoneId) {
-		    // The following line is removed:
-		    this._disconnectWindowStateSignals(window); // reenabled for testing
+		    // Disconnecting signals when simply moving between zones can cause state issues.
+		    // this._disconnectWindowStateSignals(window);
 
 		    delete window._tabbedTilingIsZoned; // 
 		    delete window._tabbedTilingZoneId; // 
