@@ -4,7 +4,6 @@
 
 
 import Meta from 'gi://Meta';
-// NOTE: global.window_group is used for correct stacking of the tab bar behind windows
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import Mtk from 'gi://Mtk';
@@ -457,16 +456,10 @@ export class WindowManager {
 _getZoneTabBar(zoneId, monitorIndex, zoneDef) {
          let bar = this._tabBars[zoneId];
          if (!bar) {
-             bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
-             this._tabBars[zoneId] = bar;
- 
-             // Attach to the windows container so normal windows render above the tab bar.
-             // This keeps the bar visible when unobstructed, but a floating window will cover it while dragging.
-             global.window_group.add_child(bar);
-             // Ensure the bar stays below normal window actors within window_group.
-             global.window_group.set_child_below_sibling(bar, null);
- 
-             // Grouping hooks: run after tabs are added/removed/reordered
+            bar = new TabBar(zoneId, zoneDef, win => this._activateWindow(zoneId, win), this._settingsManager, this);
+            this._tabBars[zoneId] = bar;
+            Main.uiGroup.add_child(bar);
+            // Grouping hooks: run after tabs are added/removed/reordered
              try {
                  bar.connect('tab-added', (_bar, _win) => {
                     this._enforceClusterIntegrity(zoneId);
