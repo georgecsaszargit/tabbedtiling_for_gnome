@@ -66,8 +66,7 @@ export class WindowManager {
         } catch {}
         // Fallback to WM_CLASS when app id isn't resolvable
         const cls = (win.get_wm_class && win.get_wm_class()) || '';
-        const inst = (win.get_wm_class_instance && win.get_wm_class_instance()) || '';
-        return `wmc:${cls}|${inst}`;
+        return `wmc:${cls}`;
     }
 
     /**
@@ -259,6 +258,7 @@ export class WindowManager {
 		this._connect(global.display, 'grab-op-begin', (d, w, o) => this._onGrabOpBegin(d, w, o)); // 
 		this._connect(global.display, 'grab-op-end', (d, w, o) => this._onGrabOpEnd(d, w, o)); // 
 		this._connect(global.display, 'window-created', (d, w) => this._onWindowCreated(d, w)); // 
+		this._connect(global.display, 'notify::focus-window', () => this._onFocusWindowChanged());
 
 		// Connect to all existing windows on startup
 		global.get_window_actors().forEach(actor => {
@@ -278,6 +278,23 @@ export class WindowManager {
 
 		log('connectSignals', 'Signals connected.'); // 
 	}
+
+    _onFocusWindowChanged() {
+        const window = global.display.focus_window;
+        if (!window || !window._tabbedTilingIsZoned) {
+            return; // Not a window we are managing.
+        }
+
+        const zoneId = window._tabbedTilingZoneId;
+        const list = this._snappedWindows[zoneId] || [];
+
+        // This window is getting focus, so make it the active one in its zone.
+        if (list.includes(window)) {
+            // Use the existing _activateWindow function which handles highlighting and state updates.
+            // We call it without the now-redundant window.activate() call inside it.
+            this._tabBars[zoneId]?.highlightWindow(window);
+        }
+    }
 
     _connect(gobj, name, cb) {
         const id = gobj.connect(name, cb);
@@ -303,7 +320,7 @@ export class WindowManager {
 		    return;
 		GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, 150, () => { // 
 		    if (!window || typeof window.get_frame_rect !== 'function' || !window.get_compositor_private()) return GLib.SOURCE_REMOVE;
-
+	    
 		    const rect = window.get_frame_rect();
 		    const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; // 
 		    const mon = window.get_monitor(); // 
